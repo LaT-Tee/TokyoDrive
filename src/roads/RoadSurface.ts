@@ -11,6 +11,7 @@ import type { Roads, Way } from '../world/Roads';
 import type { Terrain } from '../world/Terrain';
 import type { Decks } from '../decks/Decks';
 import type { TilesManager } from '../tiles/TilesManager';
+import { RoadEdges } from './RoadEdges';
 
 const CELL = 200;         // m; geometry is batched per cell
 const BUILD_RANGE = 500;  // cells within this distance of the car are paved
@@ -26,6 +27,11 @@ interface Dense {
   rx: Float64Array; rz: Float64Array;                 // unit right vector at each sample
   yL: Float64Array; yC: Float64Array; yR: Float64Array; // heights at left edge / centre / right edge
   hw: number; total: number;
+  // surveyed cross-section per sample: lateral offset of the real carriageway centre from the
+  // OSM centreline, and its real half width (defaults: 0 and hw until fitted)
+  co: Float32Array; hwI: Float32Array;
+  rawL: Float32Array; rawR: Float32Array; rawDone: Uint8Array; fitted: Uint8Array;
+  fit: boolean; // ground-level way: eligible for edge fitting
   clear: [number, number][];                          // s-intervals without paint (junctions)
   junctions: { s: number; r: number }[];
   paveAsphalt: boolean;
@@ -58,6 +64,7 @@ export class RoadSurface {
   private dense = new Map<number, Dense | null>();
   private nodes = new Map<string, { count: number; ends: number; width: number }>();
   private roadsVersion = -1;
+  readonly edges = new RoadEdges();
   private decksVersion = -1; private lastDeckCheck = 0;
   private asphaltMat = new THREE.MeshLambertMaterial({ map: makeAsphaltTexture(), polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 });
   private paintMat = new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -40 });
@@ -149,6 +156,9 @@ export class RoadSurface {
       n, xs: Float64Array.from(xs), zs: Float64Array.from(zs), s: Float64Array.from(ss),
       rx: new Float64Array(n), rz: new Float64Array(n), yL: new Float64Array(n), yC: new Float64Array(n), yR: new Float64Array(n),
       hw, total: s, clear: [], junctions: [], paveAsphalt: true,
+      co: new Float32Array(n), hwI: new Float32Array(n).fill(hw),
+      rawL: new Float32Array(n), rawR: new Float32Array(n), rawDone: new Uint8Array(n), fitted: new Uint8Array(n),
+      fit: !deckYs && !onModel,
     };
     for (let i = 0; i < n; i++) {
       const p = Math.max(0, i - 1), q = Math.min(n - 1, i + 1);
@@ -200,10 +210,48 @@ export class RoadSurface {
     return d;
   }
 
+  /** Fit the samples of a way that fall in this cell to the surveyed edge lines. */
+  private fitEdges(d: Dense, sets: Float32Array[], x0: number, z0: number, x1: number, z1: number): void {
+    const hw = d.hw, reach = Math.min(22, hw * 2.5 + 4), W = 3;
+    const raw = (i: number) => {
+      if (d.rawDone[i]) return;
+      d.rawDone[i] = 1;
+      d.rawL[i] = RoadEdges.ray(sets, d.xs[i], d.zs[i], -d.rx[i], -d.rz[i], reach);
+      d.rawR[i] = RoadEdges.ray(sets, d.xs[i], d.zs[i], d.rx[i], d.rz[i], reach);
+    };
+    const lo = Math.max(1.0, hw * 0.45), hi = Math.min(20, hw * 2.2 + 2);
+    const med = (a: Float32Array, i: number): number => {
+      const v: number[] = [];
+      for (let j = Math.max(0, i - W); j <= Math.min(d.n - 1, i + W); j++) if (a[j] === a[j]) v.push(a[j]);
+      if (v.length < 3) return NaN; // junction mouths and gaps in the survey: keep the estimate
+      v.sort((p, q) => p - q);
+      return v[v.length >> 1];
+    };
+    for (let i = 0; i < d.n; i++) {
+      if (d.fitted[i] || d.xs[i] < x0 - 6 || d.xs[i] > x1 + 6 || d.zs[i] < z0 - 6 || d.zs[i] > z1 + 6) continue;
+      for (let j = Math.max(0, i - W); j <= Math.min(d.n - 1, i + W); j++) raw(j);
+      let L = med(d.rawL, i), R = med(d.rawR, i);
+      // one side unknown: mirror the known side; both unknown: estimated width
+      if (L !== L && R !== R) { L = hw; R = hw; } else if (L !== L) L = Math.min(R, hw * 1.3); else if (R !== R) R = Math.min(L, hw * 1.3);
+      L = Math.max(lo, Math.min(hi, L)) ; R = Math.max(lo, Math.min(hi, R));
+      // keep a hand's width inside the surveyed line so the ribbon never pokes past a kerb
+      L -= 0.12; R -= 0.12;
+      d.co[i] = (R - L) / 2; d.hwI[i] = (L + R) / 2; d.fitted[i] = 1;
+      const cx = d.xs[i] + d.rx[i] * d.co[i], cz = d.zs[i] + d.rz[i] * d.co[i];
+      d.yC[i] = this.terrain.heightAt(cx, cz) + ROAD_LIFT;
+      d.yL[i] = this.terrain.heightAt(cx - d.rx[i] * d.hwI[i], cz - d.rz[i] * d.hwI[i]) + ROAD_LIFT;
+      d.yR[i] = this.terrain.heightAt(cx + d.rx[i] * d.hwI[i], cz + d.rz[i] * d.hwI[i]) + ROAD_LIFT;
+    }
+  }
+
   private buildCell(kx: number, kz: number): boolean {
     const x0 = kx * CELL, z0 = kz * CELL, x1 = x0 + CELL, z1 = z0 + CELL;
     const mx = x0 + CELL / 2, mz = z0 + CELL / 2;
     if (!this.roads.hasData(mx, mz) || !this.terrain.isReady(mx, mz)) return false;
+    // surveyed road edges for this cell (plus the reach of the fitting rays) must be in
+    const E = 45;
+    if (!this.edges.ready(x0 - E, z0 - E, x1 + E, z1 + E)) return false;
+    const edgeSets = this.edges.collect(x0 - E, z0 - E, x1 + E, z1 + E);
     const A: Buf = { pos: [], uv: [], col: [] }, P: Buf = { pos: [], uv: [], col: [] };
     let missingBridge = false;
     const m = 30; // margin: a way's ribbon can stick out of its centreline bbox
@@ -211,6 +259,7 @@ export class RoadSurface {
       if (w.tunnel || w.maxX < x0 - m || w.minX > x1 + m || w.maxZ < z0 - m || w.minZ > z1 + m) continue;
       const d = this.denseOf(w);
       if (!d) { if (w.bridge) { missingBridge = true; continue; } return false; } // ground not ready: try this cell again later
+      if (d.fit && edgeSets.length) this.fitEdges(d, edgeSets, x0, z0, x1, z1);
       this.emitWay(w, d, x0, z0, x1, z1, mx, mz, A, P);
     }
     const mk = (b: Buf, mat: THREE.Material, colors: boolean, order: number): THREE.Mesh | null => {
@@ -247,7 +296,9 @@ export class RoadSurface {
       const f = Math.max(-1, Math.min(1, o / d.hw));
       const yi = f < 0 ? d.yC[i] + (d.yL[i] - d.yC[i]) * -f : d.yC[i] + (d.yR[i] - d.yC[i]) * f;
       const yj = f < 0 ? d.yC[j] + (d.yL[j] - d.yC[j]) * -f : d.yC[j] + (d.yR[j] - d.yC[j]) * f;
-      out.push(x + rx * o - ox, yi + (yj - yi) * t + lift, z + rz * o - oz);
+      // nominal lateral position o (in the estimated cross-section) -> surveyed cross-section
+      const lat = d.co[i] + (d.co[j] - d.co[i]) * t + (o / d.hw) * (d.hwI[i] + (d.hwI[j] - d.hwI[i]) * t);
+      out.push(x + rx * lat - ox, yi + (yj - yi) * t + lift, z + rz * lat - oz);
     };
     const quad = (b: Buf, i: number, ta: number, tb: number, oL: number, oR: number, lift: number, c?: [number, number, number]) => {
       const q: number[] = [];
