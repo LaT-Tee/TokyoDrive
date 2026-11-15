@@ -1,0 +1,68 @@
+{
+ "mode": "phase1",
+ "base": "http://localhost:5173",
+ "quality": "balanced",
+ "date": "2026-11-15T13:17:06.303Z",
+ "results": {
+  "start": {
+   "x": 6.251334396009495,
+   "y": 73.62154456924347,
+   "z": 35.45307910843949,
+   "speed": 0,
+   "heading": 0,
+   "odometer": 0,
+   "blocked": false,
+   "airborne": false,
+   "surface": 73.62108166237479,
+   "terrainReady": true,
+   "obstacle": 74.4,
+   "pending": 0,
+   "tilesPending": 0,
+   "terrainPending": 0,
+   "fps": 60.00393468424168,
+   "lat": 35.689280472005926,
+   "lon": 139.70066906247334,
+   "samples": 4512,
+   "fallbackSamples": 0,
+   "sampleMs": 43.19999951124191,
+   "minClearance": -0.0002707632207403776,
+   "maxClearance": 0,
+   "loadErrors": 0
+  },
+  "drive>=500m": {
+   "pass": true,
+   "metres": 551,
+   "seconds": 47.7
+  },
+  "stays-on-ground": {
+   "pass": true,
+   "minClearance": -0.02,
+   "maxClearance": 0.14
+  },
+  "ground-samples": {
+   "pass": true,
+   "samples": 85479,
+   "fallback": 0,
+   "msPerFrame": 0.0888
+  },
+  "stops-at-wall": {
+   "pass": true,
+   "ok": true,
+   "moved": true,
+   "blocked": true,
+   "speed": 0,
+   "gapToWall": 8.44,
+   "insideBuilding": false,
+   "approach": 16
+  },
+  "fps": {
+   "pass": true,
+   "fps": 60
+  },
+  "no-console-errors": {
+   "pass": true,
+   "errors": []
+  }
+ },
+ "pass": true
+}

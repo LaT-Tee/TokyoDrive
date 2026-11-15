@@ -1,0 +1,298 @@
+// Multi-tileset management: the region is a composite of per-municipality
+// PLATEAU 3D Tiles tilesets listed in the manifest. Tilesets are activated
+// when the player is near their bounds and share one LRU cache and one set of
+// download / parse queues with explicit caps (CLAUDE.md §8, §9.5).
+import * as THREE from 'three';
+import { TilesRenderer } from '3d-tiles-renderer';
+import { GLTFExtensionsPlugin } from '3d-tiles-renderer/plugins';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
+import { frame } from '../geo/geodesy';
+import type { HeightGrid } from '../world/HeightGrid';
+import type { DeckProvider } from '../world/Ground';
+
+(THREE.BufferGeometry.prototype as any).computeBoundsTree = computeBoundsTree;
+(THREE.BufferGeometry.prototype as any).disposeBoundsTree = disposeBoundsTree;
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
+
+export interface ManifestTileset {
+  id: string; cityCode: string; city: string;
+  type: 'bldg' | 'brid' | 'tran';
+  lod: number; texture: boolean;
+  /** Self-hosted URL relative to the data base, when downloaded. */
+  url?: string;
+  /** Official streaming URL (prototype / fallback only). */
+  remoteUrl: string;
+  bounds: { west: number; south: number; east: number; north: number };
+}
+export interface Manifest {
+  generated: string;
+  bounds: { west: number; south: number; east: number; north: number };
+  tilesets: ManifestTileset[];
+  terrain: { dem: string[]; demFill: string[]; ortho: string[]; safetyDem: string[]; safetyPhoto: string[] };
+  osm?: { zoom: number; tiles: string[] };
+}
+
+/** Retries failed fetches with backoff; a tile that keeps failing is reported, not fatal. */
+class RetryFetchPlugin {
+  name = 'RETRY_FETCH_PLUGIN';
+  async fetchData(url: string, options: RequestInit): Promise<Response> {
+    let last: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await fetch(url, options);
+        if (res.ok || (res.status >= 400 && res.status < 500 && res.status !== 429)) return res;
+        last = new Error('HTTP ' + res.status);
+      } catch (e) {
+        if ((e as any)?.name === 'AbortError') throw e;
+        last = e;
+      }
+      await new Promise((r) => setTimeout(r, 400 * 2 ** attempt));
+    }
+    throw last;
+  }
+}
+
+/** Downscales oversized tile textures before upload: PLATEAU facade textures are
+ *  large but soft, and at full size ~150 tiles fill a 0.8 GB cache. */
+class TextureLimitPlugin {
+  name = 'TEXTURE_LIMIT_PLUGIN';
+  constructor(private owner: { maxTextureSize: number }) {}
+  async processTileModel(scene: THREE.Object3D): Promise<void> {
+    const max = this.owner.maxTextureSize;
+    const seen = new Set<THREE.Texture>();
+    scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
+        const t = (mat as THREE.MeshStandardMaterial).map;
+        if (t) seen.add(t);
+      }
+    });
+    await Promise.all([...seen].map(async (t) => {
+      const img = t.image as ImageBitmap | HTMLImageElement | undefined;
+      if (!img || !(img as any).width) return;
+      const w = (img as any).width as number, h = (img as any).height as number;
+      const k = Math.min(1, max / Math.max(w, h));
+      if (k >= 1) return;
+      try {
+        const small = await createImageBitmap(img as any, { resizeWidth: Math.max(1, Math.round(w * k)), resizeHeight: Math.max(1, Math.round(h * k)), resizeQuality: 'medium' });
+        (img as any).close?.();
+        t.image = small; t.needsUpdate = true;
+      } catch { /* keep the original */ }
+    }));
+  }
+}
+
+interface Entry {
+  def: ManifestTileset;
+  minX: number; maxX: number; minZ: number; maxZ: number;
+  tiles: TilesRenderer | null;
+  failed: boolean;
+}
+
+export class TilesManager implements DeckProvider {
+  readonly root = new THREE.Group(); // ECEF -> local frame
+  private entries: Entry[] = [];
+  private lru: any = null; private dq: any = null; private pq: any = null;
+  private draco = new DRACOLoader().setDecoderPath(import.meta.env.BASE_URL + 'draco/').setWorkerLimit(2);
+  private deckMeshes = new Map<THREE.Mesh, THREE.Object3D>();
+  private raycaster = new THREE.Raycaster();
+  private down = new THREE.Vector3(0, -1, 0);
+  private lastSelect = -1e9;
+  errorTarget = 18;
+  maxTextureSize = 512;
+  /** Buildings are loaded / displayed only within this distance of the camera. */
+  loadDistance = 1200;
+  // Tiles are culled against a copy of the game camera with a short far plane, so
+  // nothing beyond loadDistance (or outside the view) is ever requested.
+  private cullCamera = new THREE.PerspectiveCamera();
+  private lastUpdate = -1e9;
+  loadErrors = 0;
+  /** Called for every loaded bridge mesh (for deck-coverage tests). */
+  onBridgeLoaded: (() => void) | null = null;
+
+  constructor(
+    private manifest: Manifest, private dataBase: string,
+    private camera: THREE.PerspectiveCamera, private renderer: THREE.WebGLRenderer,
+    private obstacles: HeightGrid,
+  ) {
+    this.root.name = 'plateau-tiles';
+    this.root.matrixAutoUpdate = false;
+    this.root.matrix.fromArray(frame.ecefToLocalMatrix());
+    this.root.updateMatrixWorld(true);
+    (this.raycaster as any).firstHitOnly = true;
+    const p = { x: 0, y: 0, z: 0 };
+    for (const def of manifest.tilesets) {
+      const b = def.bounds;
+      let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+      for (const [la, lo] of [[b.south, b.west], [b.south, b.east], [b.north, b.west], [b.north, b.east]]) {
+        frame.llaToLocal(la, lo, 0, p);
+        minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
+      }
+      this.entries.push({ def, minX, maxX, minZ, maxZ, tiles: null, failed: false });
+    }
+  }
+
+  private url(def: ManifestTileset): string {
+    if (def.url) return /^https?:/.test(def.url) ? def.url : this.dataBase + '/' + def.url;
+    return def.remoteUrl;
+  }
+
+  private activate(e: Entry): void {
+    const tiles = new TilesRenderer(this.url(e.def));
+    if (this.lru) { tiles.lruCache = this.lru; tiles.downloadQueue = this.dq; tiles.parseQueue = this.pq; }
+    else {
+      this.lru = tiles.lruCache; this.dq = tiles.downloadQueue; this.pq = tiles.parseQueue;
+      // explicit cache caps
+      this.lru.minSize = 2500; this.lru.maxSize = 4000;
+      this.lru.minBytesSize = 0.9 * 2 ** 30; this.lru.maxBytesSize = 1.2 * 2 ** 30;
+      this.dq.maxJobsPerOrigin = 6; this.pq.maxJobs = 1;
+    }
+    tiles.registerPlugin(new RetryFetchPlugin() as any);
+    tiles.registerPlugin(new TextureLimitPlugin(this) as any);
+    tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: this.draco, autoDispose: false } as any));
+    tiles.errorTarget = this.errorTarget;
+    tiles.setCamera(this.cullCamera);
+    tiles.setResolutionFromRenderer(this.cullCamera, this.renderer);
+    const isBridge = e.def.type === 'brid';
+    const world = new THREE.Matrix4();
+    tiles.addEventListener('load-model', (ev: any) => {
+      const scene = ev.scene as THREE.Object3D;
+      scene.updateMatrix();
+      scene.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh) return;
+        // PLATEAU materials ship with roughness 0 (mirror-like); make them matte
+        for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
+          const s = mat as THREE.MeshStandardMaterial;
+          if ('roughness' in s) { s.roughness = 0.9; s.metalness = 0; }
+          if (!s.map && 'color' in s) s.color.setRGB(0.78, 0.78, 0.76);
+        }
+        // world matrix in the local frame (scene.matrix is the tile's ECEF transform)
+        world.identity();
+        let n: THREE.Object3D | null = m;
+        while (n && n !== scene) { n.updateMatrix(); world.premultiply(n.matrix); n = n.parent; }
+        world.premultiply(scene.matrix).premultiply(this.root.matrix);
+        if (isBridge) {
+          (m.geometry as any).computeBoundsTree?.();
+          this.deckMeshes.set(m, scene);
+        } else if (e.def.type === 'bldg') {
+          this.obstacles.addMesh(m.geometry, world);
+        }
+      });
+      if (isBridge) this.onBridgeLoaded?.();
+    });
+    tiles.addEventListener('dispose-model', (ev: any) => {
+      (ev.scene as THREE.Object3D).traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.isMesh && this.deckMeshes.delete(m)) (m.geometry as any).disposeBoundsTree?.();
+      });
+    });
+    tiles.addEventListener('load-error', (ev: any) => {
+      this.loadErrors++;
+      console.warn(`[tiles] ${e.def.id}: load error, falling back to safety ground`, ev.url ?? '', ev.error?.message ?? ev.error);
+      if (!tiles.root) { e.failed = true; this.deactivate(e); }
+    });
+    this.root.add(tiles.group);
+    e.tiles = tiles;
+  }
+
+  private deactivate(e: Entry): void {
+    if (!e.tiles) return;
+    this.root.remove(e.tiles.group);
+    try { e.tiles.dispose(); } catch (err) { console.warn('[tiles] dispose failed', err); }
+    e.tiles = null;
+  }
+
+  setErrorTarget(v: number): void {
+    this.errorTarget = v;
+    for (const e of this.entries) if (e.tiles) e.tiles.errorTarget = v;
+  }
+
+  /** Call once per frame (after the camera has been updated). */
+  update(x: number, z: number, now: number): void {
+    const range = this.loadDistance + 150;
+    if (now - this.lastSelect > 1000) {
+      this.lastSelect = now;
+      for (const e of this.entries) {
+        const dx = Math.max(e.minX - x, 0, x - e.maxX), dz = Math.max(e.minZ - z, 0, z - e.maxZ);
+        const d = Math.hypot(dx, dz);
+        if (!e.tiles && !e.failed && d < range) this.activate(e);
+        else if (e.tiles && d > range * 1.5 + 300) this.deactivate(e);
+      }
+    }
+    // tile selection is CPU work per tileset: 20 Hz is plenty at driving speeds
+    if (now - this.lastUpdate < 50) return;
+    this.lastUpdate = now;
+    const c = this.cullCamera, g = this.camera;
+    c.fov = g.fov; c.aspect = g.aspect; c.near = g.near; c.far = this.loadDistance;
+    c.updateProjectionMatrix();
+    c.matrixWorld.copy(g.matrixWorld); c.matrixWorldInverse.copy(g.matrixWorldInverse);
+    for (const e of this.entries) {
+      if (!e.tiles) continue;
+      try {
+        e.tiles.setResolutionFromRenderer(c, this.renderer);
+        e.tiles.update();
+      } catch (err) {
+        // a broken tileset must never freeze the frame loop
+        console.warn(`[tiles] ${e.def.id}: update failed, disabling`, err);
+        e.failed = true; this.deactivate(e);
+      }
+    }
+  }
+
+  /** Tiles still downloading / parsing across all active tilesets. */
+  get pending(): number {
+    let n = 0;
+    for (const e of this.entries) {
+      const s = (e.tiles as any)?.stats;
+      if (s) n += (s.queued ?? 0) + (s.downloading ?? 0) + (s.parsing ?? 0);
+      else if (e.tiles && !e.tiles.root) n += 1;
+    }
+    return n;
+  }
+
+  get activeCount(): number { return this.entries.reduce((n, e) => n + (e.tiles ? 1 : 0), 0); }
+
+  /** Municipality whose bounds contain (x, z), for the HUD. */
+  placeName(x: number, z: number): string {
+    let best = '', area = Infinity;
+    for (const e of this.entries) {
+      if (e.def.type !== 'bldg' || x < e.minX || x > e.maxX || z < e.minZ || z > e.maxZ) continue;
+      const a = (e.maxX - e.minX) * (e.maxZ - e.minZ);
+      if (a < area) { area = a; best = e.def.city; }
+    }
+    return best;
+  }
+
+  // DeckProvider: PLATEAU bridge models are drivable via BVH raycast.
+  deckHeight(x: number, z: number, maxY: number): number {
+    if (!this.deckMeshes.size) return -Infinity;
+    return this.castDown(x, maxY, z, 6);
+  }
+
+  /** Downward BVH raycast against loaded bridge meshes. */
+  castDown(x: number, y: number, z: number, far: number): number {
+    const rc = this.raycaster;
+    rc.ray.origin.set(x, y, z); rc.ray.direction.copy(this.down); rc.near = 0; rc.far = far;
+    let best = -Infinity;
+    const hits: THREE.Intersection[] = [];
+    for (const [m, scene] of this.deckMeshes) {
+      if (!scene.parent) continue; // tile not active: world matrix is stale
+      const bs = m.geometry.boundingSphere;
+      if (bs) {
+        const e = m.matrixWorld.elements;
+        const cx = e[12], cz = e[14];
+        // cheap reject using the mesh origin (tiles are RTC-centred) + radius
+        if (Math.abs(cx - x) > bs.radius + bs.center.length() || Math.abs(cz - z) > bs.radius + bs.center.length()) continue;
+      }
+      hits.length = 0;
+      m.raycast(rc, hits);
+      for (const h of hits) if (h.point.y > best) best = h.point.y;
+    }
+    return best;
+  }
+
+  get bridgeMeshCount(): number { return this.deckMeshes.size; }
+}
