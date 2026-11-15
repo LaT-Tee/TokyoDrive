@@ -54,6 +54,9 @@ export class CarVisual {
     }
   }
 
+  /** Recompile the car's materials (needed after renderer-wide changes such as enabling shadows). */
+  refreshMaterials(): void { this.model?.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) (m.material as THREE.Material).needsUpdate = true; }); }
+
   setHeadlights(on: boolean): void {
     for (const l of this.headlights) l.intensity = on ? 900 : 0;
     this.lampMat.color.set(on ? 0xfff6dd : 0x333333);
@@ -79,6 +82,8 @@ export class CarVisual {
       const m = o as THREE.Mesh;
       if (m.isMesh && (o.name === 'body' || o.parent?.name === 'body') && !bodyMesh) bodyMesh = m;
     });
+    // the car takes building shadows like everything else in the street
+    model.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).receiveShadow = true; });
     this.root.add(model);
     if (bodyMesh) this.preparePaint(model, bodyMesh);
     this.setColor('#' + this.color.getHexString());

@@ -10,13 +10,14 @@ import * as THREE from 'three';
 import type { Roads, Way } from '../world/Roads';
 import type { Terrain } from '../world/Terrain';
 import type { Decks } from '../decks/Decks';
+import type { TilesManager } from '../tiles/TilesManager';
 
 const CELL = 200;         // m; geometry is batched per cell
 const BUILD_RANGE = 500;  // cells within this distance of the car are paved
 const DROP_RANGE = 750;
 const STEP = 4;           // m between centreline samples
 export const ROAD_LIFT = 0.1;
-const PAINT_LIFT = 0.035;
+const PAINT_LIFT = 0.07;
 const WHITE: [number, number, number] = [0.82, 0.82, 0.8];
 const YELLOW: [number, number, number] = [0.85, 0.6, 0.08];
 
@@ -59,10 +60,10 @@ export class RoadSurface {
   private roadsVersion = -1;
   private decksVersion = -1; private lastDeckCheck = 0;
   private asphaltMat = new THREE.MeshLambertMaterial({ map: makeAsphaltTexture(), polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 });
-  private paintMat = new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -10 });
+  private paintMat = new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -40 });
   builtCells = 0;
 
-  constructor(private roads: Roads, private terrain: Terrain, private decks: Decks) { this.group.name = 'road-surface'; }
+  constructor(private roads: Roads, private terrain: Terrain, private decks: Decks, private tiles: TilesManager) { this.group.name = 'road-surface'; }
 
   update(x: number, z: number): void {
     if (!this.roads.enabled) return;
@@ -117,9 +118,10 @@ export class RoadSurface {
   private denseOf(w: Way): Dense | null {
     if (this.dense.has(w.id)) return this.dense.get(w.id)!;
     let deckYs: Float64Array | null = null;
+    let onModel = false; // a real PLATEAU bridge: heights come from raycasts on its mesh
     if (w.bridge) {
       deckYs = this.decks.profile(w.id);
-      if (!deckYs) return null; // covered by a real PLATEAU bridge, or deck not built yet (not cached: retry)
+      if (!deckYs) { if (this.decks.isCoveredWay(w.id)) onModel = true; else return null; } // deck not built yet (not cached: retry)
     }
     const xs: number[] = [], zs: number[] = [], ss: number[] = [], ys: number[] = [];
     const nodeS: number[] = [];
@@ -154,11 +156,38 @@ export class RoadSurface {
       const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
       d.rx[i] = -dz; d.rz[i] = dx;
       if (deckYs) { d.yL[i] = d.yC[i] = d.yR[i] = ys[i] + 0.03; continue; }
+      if (onModel) {
+        const g = this.terrain.heightAt(xs[i], zs[i]);
+        d.yC[i] = this.tiles.castDown(xs[i], g + 160, zs[i], 161.5);
+        d.yL[i] = this.tiles.castDown(xs[i] - d.rx[i] * hw * 0.8, g + 160, zs[i] - d.rz[i] * hw * 0.8, 161.5);
+        d.yR[i] = this.tiles.castDown(xs[i] + d.rx[i] * hw * 0.8, g + 160, zs[i] + d.rz[i] * hw * 0.8, 161.5);
+        continue;
+      }
       const lx = xs[i] - d.rx[i] * hw, lz = zs[i] - d.rz[i] * hw, rx2 = xs[i] + d.rx[i] * hw, rz2 = zs[i] + d.rz[i] * hw;
       if (!this.terrain.isReady(lx, lz) || !this.terrain.isReady(rx2, rz2)) return null; // not cached: retry later
       d.yL[i] = this.terrain.heightAt(lx, lz) + ROAD_LIFT;
       d.yC[i] = this.terrain.heightAt(xs[i], zs[i]) + ROAD_LIFT;
       d.yR[i] = this.terrain.heightAt(rx2, rz2) + ROAD_LIFT;
+    }
+    if (onModel) {
+      // The topmost hit can be a tower beam, cable or sign gantry: replace outliers by the
+      // local median so the ribbon follows the deck, and give up if the model is not there yet.
+      const valid: number[] = [];
+      for (let i = 0; i < n; i++) if (d.yC[i] > -1e8) valid.push(i);
+      if (valid.length < n * 0.7) return null; // tiles still loading: retry later
+      const med = (i: number) => {
+        const v: number[] = [];
+        for (let j = Math.max(0, i - 4); j <= Math.min(n - 1, i + 4); j++) if (d.yC[j] > -1e8) v.push(d.yC[j]);
+        v.sort((a, b) => a - b);
+        return v.length ? v[v.length >> 1] : NaN;
+      };
+      const m = Array.from({ length: n }, (_, i) => med(i));
+      for (let i = 0; i < n; i++) {
+        if (!(Math.abs(d.yC[i] - m[i]) < 1.2)) d.yC[i] = m[i];
+        if (!(Math.abs(d.yL[i] - d.yC[i]) < 0.7)) d.yL[i] = d.yC[i];
+        if (!(Math.abs(d.yR[i] - d.yC[i]) < 0.7)) d.yR[i] = d.yC[i];
+        d.yC[i] += 0.18; d.yL[i] += 0.18; d.yR[i] += 0.18; // clear of the model's uneven deck surface
+      }
     }
     for (let k = 0; k < w.n; k++) {
       if (!this.isJunction(w.keys[k])) continue;

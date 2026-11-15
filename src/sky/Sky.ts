@@ -22,7 +22,9 @@ export class Sky {
   private shadowCenter = new THREE.Vector3(1e9, 0, 1e9);
   private shadowRange = 0;
   private shadowDirty = true;
-  private lastShadowTime = 0;
+  private frameNo = 0;
+  private ecefToLocal = new THREE.Matrix4().fromArray(frame.ecefToLocalMatrix());
+  private tmpA = new THREE.Vector3(); private tmpB = new THREE.Vector3(); private tmpC = new THREE.Vector3(); private tmpD = new THREE.Vector3();
   private renderer: THREE.WebGLRenderer;
 
   constructor(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
@@ -100,15 +102,22 @@ export class Sky {
     this.skyLight.sunDirection.copy(this.sunDir);
     this.aerial.sunDirection.copy(this.sunDir);
     this.aerial.moonDirection.copy(this.moonDir);
-    // Shadow trick: buildings are static and the sun barely moves, so the shadow map is
-    // only re-rendered when the car has left the centre of the shadowed area or new
-    // geometry arrived - not every frame. The car itself uses a cheap blob shadow.
-    const now = performance.now();
+    // Shadows follow the car continuously. The shadowed area is re-centred in whole shadow
+    // texels (measured in the light's own axes), so shadow edges do not crawl or pop as the
+    // car moves; the map is only re-rendered when that centre actually changed or new
+    // geometry arrived, and at most every other frame. The car uses a cheap blob shadow.
     if (this.shadowRange > 0) {
-      const far = Math.hypot(focus.x - this.shadowCenter.x, focus.z - this.shadowCenter.z) > this.shadowRange * 0.3;
-      if (far || (this.shadowDirty && now - this.lastShadowTime > 600)) {
-        this.shadowCenter.copy(focus);
-        this.shadowDirty = false; this.lastShadowTime = now;
+      const d = this.tmpA.copy(this.sunDir).transformDirection(this.ecefToLocal);          // toward the sun
+      const right = this.tmpB.set(0, 1, 0).cross(d).normalize();
+      const up = this.tmpC.copy(d).cross(right);
+      const texel = (this.shadowRange * 2) / this.sunLight.shadow.mapSize.x;
+      const a = Math.round(focus.dot(right) / texel) * texel, b2 = Math.round(focus.dot(up) / texel) * texel, c = focus.dot(d);
+      this.tmpD.set(0, 0, 0).addScaledVector(right, a).addScaledVector(up, b2).addScaledVector(d, c);
+      this.frameNo++;
+      // (a pending refresh is never delayed: the map must exist before anything samples it)
+      if (this.shadowDirty || (this.tmpD.distanceToSquared(this.shadowCenter) > 1e-6 && this.frameNo % 2 === 0)) {
+        this.shadowCenter.copy(this.tmpD);
+        this.shadowDirty = false;
         this.renderer.shadowMap.needsUpdate = true;
       }
       this.sunLight.target.position.copy(this.shadowCenter);

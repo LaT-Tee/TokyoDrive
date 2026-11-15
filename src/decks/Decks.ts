@@ -37,6 +37,9 @@ export class Decks implements DeckProvider {
   /** Deck heights for a procedurally built bridge way (null if not built or covered by PLATEAU). */
   profile(id: number): Float64Array | null { const d = this.decks.get(id); return d && d.mesh ? d.ys : null; }
 
+  /** True when a real PLATEAU bridge model stands where this bridge way runs. */
+  isCoveredWay(id: number): boolean { return !!this.decks.get(id)?.covered; }
+
   get count(): number { let n = 0; for (const d of this.decks.values()) if (d.mesh) n++; return n; }
   get coveredCount(): number { let n = 0; for (const d of this.decks.values()) if (d.covered) n++; return n; }
 
@@ -57,7 +60,7 @@ export class Decks implements DeckProvider {
       this.bridgeDirty = false;
       for (const d of this.decks.values()) {
         if (d.covered) continue;
-        if (this.isCovered(d)) { d.covered = true; this.disposeMesh(d); this.version++; }
+        if (this.isCovered(d)) { d.covered = true; this.disposeMesh(d); this.version++; this.adoptModel(d.way); }
       }
     }
     if (this.roadsVersion === this.roads.version && this.pendingNone) return;
@@ -74,16 +77,48 @@ export class Decks implements DeckProvider {
       batch.push(w);
     }
     if (!batch.length) return;
-    const heights = this.solveHeights(batch);
+    // Ways that a real PLATEAU bridge model already covers come first: their node heights
+    // are read off the model and become fixed anchors, so procedural decks next to them
+    // join the real bridge instead of ending in mid-air at a guessed height.
+    const procedural: Way[] = [];
     for (const w of batch) {
+      const probe: Deck = { way: w, ys: new Float64Array(w.n), mesh: null, covered: false, checkedAt: now };
+      if (this.isCovered(probe)) { probe.covered = true; this.decks.set(w.id, probe); this.adoptModel(w); this.version++; }
+      else procedural.push(w);
+    }
+    const heights = this.solveHeights(procedural);
+    for (const w of procedural) {
+      if (this.decks.has(w.id)) continue;
       const d: Deck = { way: w, ys: heights.get(w.id)!, mesh: null, covered: false, checkedAt: now };
       this.decks.set(w.id, d);
-      if (this.isCovered(d)) d.covered = true; else this.buildMesh(d);
+      this.buildMesh(d);
       this.version++;
       if (performance.now() - t0 > 12) { this.pendingNone = false; this.roadsVersion = -1; break; } // continue next tick
     }
   }
   private pendingNone = false;
+
+  /** Fix the node heights of a model-covered way to the model's surface; rebuild procedural neighbours that disagree. */
+  private adoptModel(w: Way): void {
+    const changed = new Set<string>();
+    for (let k = 0; k < w.n; k++) {
+      const g = this.terrain.heightAt(w.xs[k], w.zs[k]);
+      const h = this.tiles.castDown(w.xs[k], g + 160, w.zs[k], 161.5);
+      if (!(h > g - 1 && h < g + 130)) continue;
+      const prev = this.nodeY.get(w.keys[k]);
+      if (prev === undefined || Math.abs(prev - h) > 0.25) changed.add(w.keys[k]);
+      this.nodeY.set(w.keys[k], h); this.modelKeys.add(w.keys[k]);
+    }
+    if (!changed.size) return;
+    for (const [id, d] of this.decks) {
+      if (d.covered || !d.mesh || !d.way.keys.some((key) => changed.has(key))) continue;
+      // forget this deck's own guesses (not the model's), then let update() rebuild it
+      for (const key of d.way.keys) if (!this.modelKeys.has(key)) this.nodeY.delete(key);
+      this.disposeMesh(d); this.decks.delete(id); this.version++;
+    }
+    this.roadsVersion = -1;
+  }
+  private modelKeys = new Set<string>();
 
   private disposeMesh(d: Deck): void {
     if (!d.mesh) return;
@@ -189,7 +224,7 @@ export class Decks implements DeckProvider {
     let run = 0;
     for (let k = 0; k < w.n - 1; k++) {
       const l0 = L[k], l1 = L[k + 1], r0 = R[k], r1 = R[k + 1];
-      quad(l0, r0, r1, l1, 0.075, 0.078, 0.085);                              // asphalt top
+      quad(dn(l0, 0.14), dn(r0, 0.14), dn(r1, 0.14), dn(l1, 0.14), 0.075, 0.078, 0.085); // deck top, below the paved road ribbon
       quad(dn(l0, THICK), dn(l1, THICK), dn(r1, THICK), dn(r0, THICK), 0.2, 0.2, 0.2); // underside
       quad(up(l0, RAIL_H), dn(l0, THICK), dn(l1, THICK), up(l1, RAIL_H), 0.33, 0.33, 0.32); // left side + rail (outer)
       quad(up(l0, RAIL_H), up(l1, RAIL_H), l1, l0, 0.4, 0.4, 0.39);      // left rail (inner)

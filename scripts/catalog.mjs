@@ -39,7 +39,7 @@ function regionOf(bv) {
 }
 
 const cat = await getJson(CATALOG);
-const all = cat.latest_datasets.filter((d) => d.format === '3D Tiles' && ['bldg', 'brid'].includes(d.type_en));
+const all = cat.latest_datasets.filter((d) => d.format === '3D Tiles' && ['bldg', 'brid', 'veg', 'frn'].includes(d.type_en));
 const code = (d) => d.ward_code || d.city_code;
 const inTokyo = (c) => c.startsWith('13') && +c < 13360 && !EXCLUDED.has(c); // < 13360 drops the islands
 const inYokohama = (c) => c === '14100' || (+c >= 14101 && +c <= 14118);
@@ -55,15 +55,19 @@ for (const d of all) {
 // Per municipality and feature type keep one dataset: LOD2 textured if published,
 // otherwise the best available (LOD is a patchwork; LOD3/4 pockets duplicate LOD2).
 function pick(list, type) {
-  const c = list.filter((d) => d.type_en === type);
-  const rank = (d) => (d.lod === '2' ? 100 : d.lod === '1' ? 50 : 10) + (d.texture ? 5 : 0);
+  const [t, sub] = type.split(':');
+  const c = list.filter((d) => d.type_en === t && (!sub || d.id.includes(sub)));
+  // buildings / bridges: LOD2 baseline. Vegetation and street furniture are separate
+  // objects (no duplication with other layers), so take the most detailed LOD published.
+  const rank = (d) => (t === 'veg' || t === 'frn' ? +d.lod * 10 : d.lod === '2' ? 100 : d.lod === '1' ? 50 : 10) + (d.texture ? 5 : 0);
   return c.sort((a, b) => rank(b) - rank(a))[0];
 }
 
 const tilesets = [];
 for (const [c, list] of [...byCity].sort()) {
-  for (const type of ['bldg', 'brid']) {
-    const d = pick(list, type);
+  for (const typeKey of ['bldg', 'brid', 'veg:SolitaryVegetationObject', 'veg:PlantCover', 'frn']) {
+    const type = typeKey.split(':')[0];
+    const d = pick(list, typeKey);
     if (!d) continue;
     const ts = await getJson(d.url);
     const inner0 = ts.root?.children?.[0]?.content?.uri ?? null;
@@ -123,6 +127,19 @@ const manifest = {
 };
 mkdirSync(new URL('../public/', import.meta.url), { recursive: true });
 writeFileSync(new URL('../public/manifest.remote.json', import.meta.url), JSON.stringify(manifest, null, 1));
+// keep an existing data/manifest.json (self-hosted URLs, OSM bake) in step with the enumeration
+try {
+  const { existsSync, readFileSync } = await import('node:fs');
+  const f = new URL('../data/manifest.json', import.meta.url);
+  if (existsSync(f)) {
+    const cur = JSON.parse(readFileSync(f, 'utf8'));
+    const have = new Set(cur.tilesets.map((t) => t.id));
+    const added = tilesets.filter((t) => !have.has(t.id));
+    cur.tilesets.push(...added);
+    writeFileSync(f, JSON.stringify(cur, null, 1));
+    console.log('data/manifest.json: added', added.length, 'tilesets');
+  }
+} catch (e) { console.warn('could not merge into data/manifest.json', e.message); }
 const total = tilesets.reduce((s, t) => s + (t.fileSize ?? 0), 0);
 console.log(`\n${tilesets.length} tilesets, ${new Set(tilesets.map((t) => t.cityCode)).size} municipalities, ${(total / 1e9).toFixed(2)} GB`);
 console.log('bounds', manifest.bounds);

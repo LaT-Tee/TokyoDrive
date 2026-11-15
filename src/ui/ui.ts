@@ -9,6 +9,10 @@ export interface UiCallbacks {
   onQuality(q: Quality): void;
   onStart(): void;
   onOpenGarage(): void;
+  onCycleCamera(): void;
+  onToggleLights(): void;
+  onMap(): void;
+  onRecover(): void;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -24,17 +28,19 @@ export class Ui {
   private speedNum = el('div', 'num', '0');
   private city = el('div', 'city');
   private road = el('div', 'road');
-  private camTag = el('span', '', 'CHASE');
-  private lightTag = el('span', '', 'LIGHTS');
+  private camBtn = el('button', 'hud-btn');
+  private lightBtn = el('button', 'hud-btn');
   private loading = el('div', 'loading hidden');
-  private startBtn = el('button', 'go', 'DRIVE');
-  private lastSpeed = -1; private lastCity = ''; private lastRoad = '';
+  private startBtn = el('button', 'go', '出发');
+  private cockpit = el('div', 'cockpit hidden');
+  private wheel = el('div', 'wheel');
+  private lastSpeed = -1; private lastCity = ''; private lastRoad = ''; private lastCam = ''; private lastLights: boolean | null = null;
 
   constructor(root: HTMLElement, cb: UiCallbacks, initial: { car: string; color: string; spawn: string; quality: Quality }) {
     const g = this.garage;
     const head = el('div');
     const h1 = el('h1'); h1.append('TOKYO ', el('span', '', 'DRIVE'));
-    head.append(h1, el('p', 'sub', '東京・横浜 フリードライブ'));
+    head.append(h1, el('p', 'sub', '东京・横滨 自由驾驶'));
     g.append(head);
 
     const group = <T,>(title: string, items: T[], label: (t: T) => [string, string?], key: (t: T) => string, sel: string, pick: (t: T) => void) => {
@@ -52,12 +58,12 @@ export class Ui {
       box.append(grid); g.append(box);
     };
 
-    group('Car', CARS, (c) => [c.name, `${c.topSpeed} km/h`], (c) => c.id, initial.car, cb.onCar);
+    group('车辆', CARS, (c) => [c.name, `${c.topSpeed} km/h`], (c) => c.id, initial.car, cb.onCar);
 
-    const colorBox = el('div'); colorBox.append(el('h2', '', 'Body color'));
+    const colorBox = el('div'); colorBox.append(el('h2', '', '车身颜色'));
     const sw = el('div', 'swatches');
     const swBtns: HTMLButtonElement[] = [];
-    const custom = el('input'); custom.type = 'color'; custom.value = initial.color; custom.setAttribute('aria-label', 'カスタムカラー');
+    const custom = el('input'); custom.type = 'color'; custom.value = initial.color; custom.setAttribute('aria-label', '自定义颜色');
     for (const c of BODY_COLORS) {
       const b = el('button', 'swatch'); b.type = 'button'; b.style.background = c; b.setAttribute('aria-label', c);
       b.setAttribute('aria-pressed', String(c === initial.color));
@@ -67,25 +73,31 @@ export class Ui {
     custom.addEventListener('input', () => { swBtns.forEach((o) => o.setAttribute('aria-pressed', 'false')); cb.onColor(custom.value); });
     sw.append(custom); colorBox.append(sw); g.append(colorBox);
 
-    group('Start point', SPAWNS, (s) => [s.name], (s) => s.id, initial.spawn, cb.onSpawn);
+    group('出发地点', SPAWNS, (s) => [s.name], (s) => s.id, initial.spawn, cb.onSpawn);
     const qs: { id: Quality; name: string; sub: string }[] = [
-      { id: 'performance', name: 'Performance', sub: '軽い' }, { id: 'balanced', name: 'Balanced', sub: '標準' }, { id: 'ultra', name: 'Ultra', sub: '高精細' },
+      { id: 'performance', name: '流畅', sub: '低负载，无阴影' }, { id: 'balanced', name: '均衡', sub: '默认' }, { id: 'ultra', name: '极致', sub: '更远、更细，负载高' },
     ];
-    group('Quality', qs, (q) => [q.name, q.sub], (q) => q.id, initial.quality, (q) => cb.onQuality(q.id));
+    group('画质（切换后建筑会重新加载）', qs, (q) => [q.name, q.sub], (q) => q.id, initial.quality, (q) => cb.onQuality(q.id));
 
     const keys = el('p', 'keys');
-    keys.innerHTML = '<b>W/S</b> アクセル・ブレーキ　<b>A/D</b> ハンドル　<b>Space</b> サイドブレーキ<br><b>R</b> 道路に復帰　<b>C</b> カメラ　<b>L</b> ライト　<b>G</b> ガレージ';
+    keys.innerHTML = '<b>W/S</b> 油门・刹车/倒车　<b>A/D</b> 转向　<b>空格</b> 手刹<br><b>C</b> 切换视角　<b>鼠标拖动</b> 环顾　<b>滚轮</b> 远近<br><b>L</b> 车灯　<b>R</b> 回到道路　<b>M</b> 地图传送　<b>G</b> 车库';
     this.startBtn.type = 'button';
     this.startBtn.addEventListener('click', () => cb.onStart());
-    g.append(keys, this.startBtn, el('p', 'credit', '3D都市モデル: Project PLATEAU (国土交通省) / 標高・航空写真: 国土地理院 / 道路: © OpenStreetMap contributors / 車両: Kenney (CC0)'));
+    g.append(keys, this.startBtn, el('p', 'credit', '3D 城市模型: Project PLATEAU（国土交通省）/ 高程・航拍・地图: 国土地理院 / 道路: © OpenStreetMap contributors / 车辆: Kenney (CC0)'));
 
     const h = this.hud;
     const speed = el('div', 'speed'); speed.append(this.speedNum, el('div', 'unit', 'KM/H'));
     const place = el('div', 'place'); place.append(this.city, this.road);
-    const status = el('div', 'status'); status.append(this.camTag, this.lightTag);
-    const menu = el('button', 'menu-btn', 'GARAGE'); menu.type = 'button';
-    menu.addEventListener('click', () => { menu.blur(); cb.onOpenGarage(); });
-    h.append(speed, place, status, this.loading, menu);
+    const bar = el('div', 'hud-bar');
+    const btn = (b: HTMLButtonElement, text: string, fn: () => void) => { b.type = 'button'; b.textContent = text; b.addEventListener('click', () => { b.blur(); fn(); }); bar.append(b); return b; };
+    btn(el('button', 'hud-btn'), '车库 G', cb.onOpenGarage);
+    btn(el('button', 'hud-btn'), '地图 M', cb.onMap);
+    btn(el('button', 'hud-btn'), '回到道路 R', cb.onRecover);
+    btn(this.camBtn, '视角 C', cb.onCycleCamera);
+    btn(this.lightBtn, '车灯 L', cb.onToggleLights);
+    // cockpit overlay: dashboard + steering wheel (right-hand drive)
+    const dash = el('div', 'dash'); this.wheel.append(el('div', 'spoke'), el('div', 'spoke v')); this.cockpit.append(el('div', 'pillar l'), el('div', 'pillar r'), dash, this.wheel);
+    h.append(this.cockpit, speed, place, bar, this.loading);
     root.append(h, g);
   }
 
@@ -97,13 +109,19 @@ export class Ui {
 
   setStartEnabled(ok: boolean, label: string): void { this.startBtn.disabled = !ok; this.startBtn.textContent = label; }
 
+  /** Cockpit overlay visibility and steering wheel angle (rad of front-wheel steer). */
+  setCockpit(on: boolean, steer: number): void {
+    this.cockpit.classList.toggle('hidden', !on);
+    if (on) this.wheel.style.transform = `rotate(${(steer * 520) / Math.PI}deg)`;
+  }
+
   setHud(kmh: number, city: string, road: string, cam: string, lights: boolean, loadingText: string): void {
     const s = Math.round(Math.abs(kmh));
     if (s !== this.lastSpeed) { this.speedNum.textContent = String(s); this.lastSpeed = s; }
     if (city !== this.lastCity) { this.city.textContent = city; this.lastCity = city; }
     if (road !== this.lastRoad) { this.road.textContent = road; this.lastRoad = road; }
-    this.camTag.textContent = cam;
-    this.lightTag.classList.toggle('on', lights);
+    if (cam !== this.lastCam) { this.camBtn.textContent = `视角 C：${cam}`; this.lastCam = cam; }
+    if (lights !== this.lastLights) { this.lightBtn.textContent = `车灯 L：${lights ? '开' : '关'}`; this.lightBtn.classList.toggle('on', lights); this.lastLights = lights; }
     this.loading.classList.toggle('hidden', !loadingText);
     if (loadingText) this.loading.textContent = loadingText;
   }

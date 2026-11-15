@@ -2,7 +2,7 @@
  "mode": "phase1",
  "base": "http://localhost:5173",
  "quality": "balanced",
- "date": "2026-11-15T13:45:28.651Z",
+ "date": "2026-11-15T23:28:14.480Z",
  "results": {
   "start": {
    "x": 10.738462168367562,
@@ -19,31 +19,31 @@
    "pending": 0,
    "tilesPending": 0,
    "terrainPending": 0,
-   "fps": 60.00393468424146,
+   "fps": 60.00393468424168,
    "lat": 35.68917245035045,
    "lon": 139.70071863437263,
-   "samples": 3815,
+   "samples": 5573,
    "fallbackSamples": 0,
-   "sampleMs": 51.69999945163727,
-   "minClearance": 0,
+   "sampleMs": 76.39999999664724,
+   "minClearance": -1.8184209693572484e-10,
    "maxClearance": 0,
    "loadErrors": 0
   },
   "drive>=500m": {
    "pass": true,
-   "metres": 550.3,
+   "metres": 550.4,
    "seconds": 41.4
   },
   "stays-on-ground": {
    "pass": true,
    "minClearance": -0.02,
-   "maxClearance": 0.145
+   "maxClearance": 0.141
   },
   "ground-samples": {
    "pass": true,
-   "samples": 85684,
+   "samples": 83675,
    "fallback": 0,
-   "msPerFrame": 0.0911
+   "msPerFrame": 0.0686
   },
   "stops-at-wall": {
    "pass": true,
@@ -51,7 +51,7 @@
    "moved": true,
    "blocked": true,
    "speed": 0,
-   "gapToWall": 5.76,
+   "gapToWall": 6.47,
    "insideBuilding": false,
    "approach": 16
   },

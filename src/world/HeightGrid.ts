@@ -104,7 +104,7 @@ export class HeightGrid {
       const w1 = ((c.z - a.z) * (px - c.x) + (a.x - c.x) * (pz - c.z)) / den;
       const w2 = 1 - w0 - w1;
       // slightly conservative so thin roofs are not missed
-      if (w0 < -0.15 || w1 < -0.15 || w2 < -0.15) continue;
+      if (w0 < -0.02 || w1 < -0.02 || w2 < -0.02) continue;
       const y = Math.min(top, w0 * a.y + w1 * b.y + w2 * c.y);
       this.stamp(gx, gz, y);
     }

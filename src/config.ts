@@ -33,9 +33,9 @@ export interface QualityPreset {
   cacheGB: number;        // tile cache byte cap
 }
 export const QUALITY: Record<Quality, QualityPreset> = {
-  performance: { errorTarget: 64, loadDistance: 900, terrainRadius: 1, pixelRatio: 0.75, textureNear: 1024, textureFar: 256, aerial: false, shadowSize: 0, shadowRange: 0, cacheGB: 0.8 },
-  balanced: { errorTarget: 40, loadDistance: 1600, terrainRadius: 2, pixelRatio: 1, textureNear: 2048, textureFar: 512, aerial: true, shadowSize: 2048, shadowRange: 170, cacheGB: 1.6 },
-  ultra: { errorTarget: 24, loadDistance: 3000, terrainRadius: 3, pixelRatio: 1.5, textureNear: 4096, textureFar: 1024, aerial: true, shadowSize: 4096, shadowRange: 240, cacheGB: 2.6 },
+  performance: { errorTarget: 16, loadDistance: 600, terrainRadius: 1, pixelRatio: 0.75, textureNear: 512, textureFar: 256, aerial: false, shadowSize: 0, shadowRange: 0, cacheGB: 0.8 },
+  balanced: { errorTarget: 8, loadDistance: 1000, terrainRadius: 2, pixelRatio: 1, textureNear: 1024, textureFar: 256, aerial: true, shadowSize: 2048, shadowRange: 220, cacheGB: 1.6 },
+  ultra: { errorTarget: 6, loadDistance: 1800, terrainRadius: 3, pixelRatio: 1.5, textureNear: 2048, textureFar: 512, aerial: true, shadowSize: 4096, shadowRange: 300, cacheGB: 2.6 },
 };
 
 export const CAMERA_NEAR = 0.5;

@@ -1,17 +1,20 @@
 import * as THREE from 'three';
 import { CAMERA_FAR, CAMERA_NEAR, DATA_BASE, QUALITY, SPAWNS, type Quality, type SpawnPoint } from './config';
 import { frame, setGeoid } from './geo/geodesy';
-import { Terrain } from './world/Terrain';
+import { Terrain, groundUniforms } from './world/Terrain';
 import { HeightGrid } from './world/HeightGrid';
 import { Ground } from './world/Ground';
 import { Roads } from './world/Roads';
+import { Vegetation } from './world/Vegetation';
 import { Decks } from './decks/Decks';
+import { TUNNEL_H, Tunnels } from './tunnels/Tunnels';
 import { ROAD_LIFT, RoadSurface } from './roads/RoadSurface';
 import { TilesManager, type Manifest } from './tiles/TilesManager';
 import { CarController, type CarInput } from './car/CarController';
 import { BODY_COLORS, CARS, CarVisual } from './car/garage';
 import { Sky } from './sky/Sky';
 import { Ui } from './ui/ui';
+import { MapView } from './ui/MapView';
 
 const params = new URLSearchParams(location.search);
 const canvas = document.getElementById('view') as HTMLCanvasElement;
@@ -55,13 +58,21 @@ async function boot(): Promise<void> {
   const roads = new Roads(manifest.osm ? { zoom: manifest.osm.zoom, tiles: new Set(manifest.osm.tiles), base: `${dataBase}/osm` } : null);
   const decks = new Decks(roads, terrain, tiles);
   scene.add(decks.group);
-  const roadSurface = new RoadSurface(roads, terrain, decks);
+  const tunnels = new Tunnels(roads, terrain);
+  scene.add(tunnels.group);
+  const roadSurface = new RoadSurface(roads, terrain, decks, tiles);
   scene.add(roadSurface.group);
+  const vegetation = new Vegetation(terrain, obstacles, roads);
+  scene.add(vegetation.group);
   ground.decks.push(tiles, decks);
+  ground.tunnels = tunnels;
+  ground.onRoad = (x, z) => { const r = roads.nearest(x, z, 12); return !!r && r.dist <= r.width / 2 - 0.3; };
   const sky = new Sky(renderer, scene, camera);
   void terrain.buildSafetyGround(manifest.bounds, t.safetyDem.map(abs), t.safetyPhoto.map(abs));
 
+  let visual: CarVisual | null = null;
   let resScale = 1; // dynamic resolution: lowered while the frame rate is under target
+  let appliedQuality: Quality | null = null;
   const applyQuality = (q: Quality) => {
     quality = q;
     tiles.setErrorTarget(QUALITY[q].errorTarget);
@@ -69,15 +80,22 @@ async function boot(): Promise<void> {
     tiles.textureNear = QUALITY[q].textureNear; tiles.textureFar = QUALITY[q].textureFar;
     tiles.setCacheLimit(QUALITY[q].cacheGB);
     sky.setShadows(QUALITY[q].shadowSize, QUALITY[q].shadowRange);
-    resScale = 1;
+    tiles.nearRange = Math.max(160, QUALITY[q].shadowRange + 60);
     sky.setAerial(QUALITY[q].aerial);
+    vegetation.enabled = q !== 'performance';
+    resScale = 1;
+    // textures are sized when a tile is loaded: reload so the new setting is actually visible
+    if (appliedQuality && appliedQuality !== q) tiles.reload();
+    visual?.refreshMaterials();
+    setTimeout(() => visual?.refreshMaterials(), 1200);
+    appliedQuality = q;
     onResize();
   };
 
   // ---- car
   let spec = CARS.find((c) => c.id === params.get('car')) ?? CARS[0];
   let color = params.get('color') ? '#' + params.get('color') : BODY_COLORS[0];
-  const visual = new CarVisual();
+  visual = new CarVisual();
   scene.add(visual.root);
   const car = new CarController(ground, spec);
   await visual.load(spec);
@@ -87,17 +105,20 @@ async function boot(): Promise<void> {
   let spawn = SPAWNS.find((s) => s.id === params.get('spawn')) ?? SPAWNS[0];
   let playing = false;
   let settled = false;       // car has been placed on loaded ground
-  let headlights = false;
-  const CAMS = ['CHASE', 'CHASE FAR', 'HOOD', 'TOP'] as const;
+  let headlights = false;    // driver's switch (L)
+  let inTunnel = false;
+  const CAMS = ['追尾', '远追尾', '车内', '引擎盖', '俯视'] as const;
   let camMode = 0;
   let camHeading = 0;
   let garageOrbit = 0;
+  // mouse look: drag to look around, wheel to zoom; recentres while driving
+  const look = { yaw: 0, pitch: 0, zoom: 1, dragging: false, lastInput: 0 };
 
   const teleport = (lat: number, lon: number, headingDeg: number) => {
     const p = frame.llaToLocal(lat, lon, 0);
     car.x = p.x; car.z = p.z; car.heading = (headingDeg * Math.PI) / 180; car.course = car.heading; car.speed = 0;
     car.y = terrain.heightAt(p.x, p.z);
-    camHeading = car.heading;
+    camHeading = car.heading; look.yaw = 0; look.pitch = 0;
     settled = false;
   };
 
@@ -121,14 +142,36 @@ async function boot(): Promise<void> {
     }
   };
 
+  const openGarage = () => { playing = false; car.speed = 0; map.show(false); ui.showGarage(true); };
+  const cycleCamera = () => { camMode = (camMode + 1) % CAMS.length; look.yaw = 0; look.pitch = 0; };
+  const toggleLights = () => { headlights = !headlights; };
+  const toggleMap = () => {
+    if (map.open) { map.show(false); return; }
+    const g = frame.localToLla(car.x, car.y, car.z);
+    map.show(true, { lat: g.lat, lon: g.lon, heading: car.heading });
+  };
+
   const ui = new Ui(document.getElementById('ui')!, {
-    onCar: (s) => { spec = s; car.spec = s; void visual.load(s); },
+    onCar: (s) => { spec = s; car.spec = s; void visual.load(s).then(() => visual.refreshMaterials()); },
     onColor: (c) => { color = c; visual.setColor(c); },
     onSpawn: (s: SpawnPoint) => { spawn = s; teleport(s.lat, s.lon, s.heading); },
     onQuality: applyQuality,
     onStart: () => { playing = true; ui.showGarage(false); canvas.focus(); },
-    onOpenGarage: () => { playing = false; car.speed = 0; ui.showGarage(true); },
+    onOpenGarage: openGarage,
+    onCycleCamera: cycleCamera,
+    onToggleLights: toggleLights,
+    onMap: toggleMap,
+    onRecover: () => recover(),
   }, { car: spec.id, color, spawn: spawn.id, quality });
+  const map = new MapView({
+    bounds: manifest.bounds,
+    coverage: manifest.tilesets.filter((s) => s.type === 'bldg').map((s) => s.bounds),
+    spawns: SPAWNS,
+    covers: (lat, lon) => tiles.covers(lat, lon),
+    onPick: (lat, lon) => { map.show(false); teleport(lat, lon, (car.heading * 180) / Math.PI); },
+    onClose: () => map.show(false),
+  });
+  document.getElementById('ui')!.append(map.el);
   applyQuality(quality);
   teleport(spawn.lat, spawn.lon, spawn.heading);
 
@@ -141,10 +184,12 @@ async function boot(): Promise<void> {
     if (e.repeat) return;
     keys.add(e.code);
     if (!playing) { if (e.code === 'Enter' && settled) { playing = true; ui.showGarage(false); } return; }
-    if (e.code === 'KeyC') camMode = (camMode + 1) % CAMS.length;
-    if (e.code === 'KeyL') { headlights = !headlights; visual.setHeadlights(headlights); }
+    if (e.code === 'KeyM' || (e.code === 'Escape' && map.open)) { toggleMap(); return; }
+    if (map.open) return;
+    if (e.code === 'KeyC') cycleCamera();
+    if (e.code === 'KeyL') toggleLights();
     if (e.code === 'KeyR') recover();
-    if (e.code === 'KeyG') { playing = false; car.speed = 0; ui.showGarage(true); }
+    if (e.code === 'KeyG') openGarage();
   });
   window.addEventListener('keyup', (e) => keys.delete(e.code));
   window.addEventListener('blur', () => keys.clear());
@@ -155,6 +200,16 @@ async function boot(): Promise<void> {
     input.steer = k('KeyD', 'ArrowRight') - k('KeyA', 'ArrowLeft');
     input.handbrake = keys.has('Space');
   };
+  canvas.addEventListener('pointerdown', (e) => { if (!playing) return; look.dragging = true; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!look.dragging) return;
+    look.yaw += e.movementX * 0.0055; look.pitch += e.movementY * 0.004; look.lastInput = performance.now();
+    look.pitch = Math.max(-0.35, Math.min(1.1, look.pitch));
+    if (camMode === 2 || camMode === 3) look.yaw = Math.max(-2.3, Math.min(2.3, look.yaw));
+  });
+  const endDrag = () => { look.dragging = false; look.lastInput = performance.now(); };
+  canvas.addEventListener('pointerup', endDrag); canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('wheel', (e) => { if (!playing) return; e.preventDefault(); look.zoom = Math.max(0.5, Math.min(3, look.zoom * (e.deltaY > 0 ? 1.1 : 0.9))); }, { passive: false });
 
   function onResize(): void {
     const w = window.innerWidth, h = window.innerHeight;
@@ -166,47 +221,68 @@ async function boot(): Promise<void> {
   window.addEventListener('resize', onResize);
 
   // ---- camera
-  const camPos = new THREE.Vector3(), look = new THREE.Vector3(), focus = new THREE.Vector3();
-  const updateCamera = (dt: number) => {
-    const fx = Math.sin(car.heading), fz = -Math.cos(car.heading);
+  const camPos = new THREE.Vector3(), lookAt = new THREE.Vector3(), focus = new THREE.Vector3();
+  const updateCamera = (dt: number, now: number) => {
+    const fx = Math.sin(car.heading), fz = -Math.cos(car.heading), rx = -fz, rz = fx;
+    // let the view drift back behind the car a moment after the mouse is released, while moving
+    if (!look.dragging && now - look.lastInput > 2500 && Math.abs(car.speed) > 2) {
+      const k = 1 - Math.exp(-dt * 2.5);
+      look.yaw += -Math.atan2(Math.sin(look.yaw), Math.cos(look.yaw)) * k; look.pitch -= look.pitch * k;
+    }
+    camera.fov = 62;
     if (!playing) {
       // garage: slow orbit around the car
       garageOrbit += dt * 0.25;
       const a = car.heading + 2.4 + Math.sin(garageOrbit) * 0.5;
       camPos.set(car.x + Math.sin(a) * 7.5, car.y + 2.3, car.z - Math.cos(a) * 7.5);
-      look.set(car.x, car.y + 0.8, car.z);
+      lookAt.set(car.x, car.y + 0.8, car.z);
       camera.up.set(0, 1, 0);
     } else if (camMode <= 1) {
       let d = car.heading - camHeading;
       d = Math.atan2(Math.sin(d), Math.cos(d));
       camHeading += d * (1 - Math.exp(-dt * 5));
-      const dist = camMode === 0 ? 6.8 : 14, h = camMode === 0 ? 2.5 : 5.5;
-      const cx = Math.sin(camHeading), cz = -Math.cos(camHeading);
-      camPos.set(car.x - cx * dist, car.y + h, car.z - cz * dist);
-      look.set(car.x + fx * 4, car.y + 1.2, car.z + fz * 4);
+      const dist = (camMode === 0 ? 6.8 : 14) * look.zoom, base = camMode === 0 ? 0.36 : 0.39;
+      const el = Math.max(0.04, Math.min(1.45, base + look.pitch)), a = camHeading + look.yaw;
+      camPos.set(car.x - Math.sin(a) * dist * Math.cos(el), car.y + 1.0 + dist * Math.sin(el), car.z + Math.cos(a) * dist * Math.cos(el));
+      // looking around aims at the car; straight behind it, aim a little ahead
+      const ahead = 4 * Math.max(0, Math.cos(look.yaw));
+      lookAt.set(car.x + fx * ahead, car.y + 1.2, car.z + fz * ahead);
       camera.up.set(0, 1, 0);
-    } else if (camMode === 2) {
-      camPos.set(car.x + fx * 0.25, car.y + spec.eyeHeight, car.z + fz * 0.25);
-      look.set(car.x + fx * 30, car.y + spec.eyeHeight - 0.6 + Math.sin(car.pitch) * 30, car.z + fz * 30);
+    } else if (camMode === 2 || camMode === 3) {
+      // 2: driver's seat (right-hand drive)   3: hood
+      const side = camMode === 2 ? 0.36 : 0, back = camMode === 2 ? -0.25 : 0.25, h = camMode === 2 ? spec.eyeHeight + 0.02 : spec.eyeHeight;
+      camPos.set(car.x + rx * side + fx * back, car.y + h, car.z + rz * side + fz * back);
+      const a = car.heading + look.yaw, p = -0.02 - look.pitch + car.pitch;
+      lookAt.set(camPos.x + Math.sin(a) * Math.cos(p) * 30, camPos.y + Math.sin(p) * 30, camPos.z - Math.cos(a) * Math.cos(p) * 30);
       camera.up.set(0, 1, 0); camHeading = car.heading;
+      camera.fov = camMode === 2 ? 68 / Math.sqrt(look.zoom) : 62;
     } else {
-      camPos.set(car.x, car.y + 90, car.z);
-      look.set(car.x, car.y, car.z);
+      camPos.set(car.x, car.y + 90 * look.zoom, car.z);
+      lookAt.set(car.x, car.y, car.z);
       camera.up.set(fx, 0, fz); camHeading = car.heading;
     }
-    if (camMode !== 2 || !playing) {
-      const gy = Math.max(terrain.heightAt(camPos.x, camPos.z, camPos.y), obstacles.heightAt(camPos.x, camPos.z) > camPos.y + 30 ? -Infinity : -Infinity) + 0.7;
-      if (camPos.y < gy) camPos.y = gy;
+    if (camMode <= 1 || !playing) {
+      if (inTunnel) {
+        // stay inside the tube: under its ceiling, and close enough not to cut through the walls
+        const tf = tunnels.floorAt(camPos.x, camPos.z, car.y);
+        const top = (tf === tf ? tf : car.y) + TUNNEL_H - 0.45;
+        if (camPos.y > top) camPos.y = top;
+        if (tf !== tf) camPos.lerp(focus.set(car.x, car.y + 1.6, car.z), 0.6);
+      } else {
+        const gy = terrain.heightAt(camPos.x, camPos.z, camPos.y) + 0.7;
+        if (camPos.y < gy) camPos.y = gy;
+      }
     }
     camera.position.copy(camPos);
-    camera.lookAt(look);
+    camera.lookAt(lookAt);
+    camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
   };
 
   const grabs: ((f: { w: number; h: number; px: Uint8Array }) => void)[] = [];
   // ---- loop
   const fps = { frames: 0, t: performance.now(), value: 0, worst: 0 };
-  let last = performance.now(), lastTerrain = -1e9, frameNo = 0, tilesVersion = -1, slowSeconds = 0;
+  let last = performance.now(), lastTerrain = -1e9, frameNo = 0, tilesVersion = -1, slowSeconds = 0, lightsOn = false;
   const loop = (now: number) => {
     requestAnimationFrame(loop);
     if (document.hidden) { last = now; return; }
@@ -216,42 +292,56 @@ async function boot(): Promise<void> {
     if (now - fps.t >= 1000) {
       fps.value = (fps.frames * 1000) / (now - fps.t); fps.frames = 0; fps.t = now;
       // dynamic resolution: trade pixels for frame rate, restore them when there is headroom
-      const before = resScale;
       // (loading hitches do not count: only sustained slowness while nothing is pending)
+      const before = resScale;
       slowSeconds = fps.value < 50 && tiles.pending === 0 ? slowSeconds + 1 : 0;
       if (slowSeconds >= 3 && resScale > 0.55) { resScale = Math.max(0.55, resScale - 0.1); slowSeconds = 1; }
       else if (fps.value > 57 && resScale < 1) resScale = Math.min(1, resScale + 0.1);
       if (resScale !== before) onResize();
-      // surface friction: asphalt on a road ribbon, loose ground elsewhere
-      if (roads.enabled && roads.hasData(car.x, car.z)) { const r = roads.nearest(car.x, car.z, 14); car.surfaceGrip = r && r.dist <= r.width / 2 + 1.2 ? 1 : 0.62; } else car.surfaceGrip = 1;
+      // surface friction: asphalt on a road ribbon or in a tunnel, loose ground elsewhere
+      if (inTunnel) car.surfaceGrip = 1;
+      else if (roads.enabled && roads.hasData(car.x, car.z)) { const r = roads.nearest(car.x, car.z, 14); car.surfaceGrip = r && r.dist <= r.width / 2 + 1.2 ? 1 : 0.62; } else car.surfaceGrip = 1;
     }
     if (tiles.version !== tilesVersion) { tilesVersion = tiles.version; sky.invalidateShadows(); }
 
-    if (now - lastTerrain > 200) { lastTerrain = now; terrain.update(car.x, car.z, QUALITY[quality].terrainRadius, car.y); roads.update(car.x, car.z); decks.update(car.x, car.z); roadSurface.update(car.x, car.z); }
+    if (now - lastTerrain > 200) {
+      lastTerrain = now;
+      terrain.update(car.x, car.z, QUALITY[quality].terrainRadius, car.y);
+      roads.update(car.x, car.z); decks.update(car.x, car.z); tunnels.update(car.x, car.z);
+      roadSurface.update(car.x, car.z); vegetation.update(car.x, car.z);
+    }
 
     if (!settled) {
       // wait for the detailed ground under the car before placing it
       if (terrain.isReady(car.x, car.z, car.y)) {
         car.place(car.x, car.z, (car.heading * 180) / Math.PI);
         settled = true;
-        // once nearby data has had a moment to load, make sure we did not spawn inside a building
+        // once nearby data has had a moment to load, snap onto the nearest road (or out of a building)
         const sx = car.x, sz = car.z;
-        setTimeout(() => { if (Math.hypot(car.x - sx, car.z - sz) < 1 && (obstacles.heightAt(car.x, car.z) > car.y + 1 || roads.hasData(car.x, car.z))) recover(); }, 4000);
+        setTimeout(() => { if (Math.hypot(car.x - sx, car.z - sz) < 1 && (obstacles.heightAt(car.x, car.z) > car.y + 1 || roads.hasData(car.x, car.z))) { recover(); camHeading = car.heading; } }, 4000);
       }
-    } else if (playing) {
+    } else if (playing && !map.open) {
       readInput();
       car.update(dt, input);
     }
-    ui.setStartEnabled(settled, settled ? 'DRIVE' : 'LOADING…');
+    ui.setStartEnabled(settled, settled ? '出发' : '加载中…');
 
-    visual.root.position.set(car.x, car.y + ROAD_LIFT, car.z);
+    // tunnels: lights come on by themselves
+    if (settled) { ground.samples--; ground.surface(car.x, car.z, car.y); inTunnel = ground.lastInTunnel; }
+    const wantLights = headlights || inTunnel;
+    if (wantLights !== lightsOn) { lightsOn = wantLights; visual.setHeadlights(lightsOn); }
+
+    visual.root.position.set(car.x, car.y + (inTunnel ? 0.02 : ROAD_LIFT), car.z);
     visual.root.rotation.set(car.pitch, -car.heading, -car.roll, 'YXZ');
     visual.animate(car.wheelSpin, car.steer);
-    visual.root.visible = !(playing && camMode === 2);
+    const firstPerson = playing && (camMode === 2 || camMode === 3);
+    visual.root.visible = !firstPerson;
+    ui.setCockpit(playing && camMode === 2, car.steer);
 
-    updateCamera(dt);
+    updateCamera(dt, now);
     tiles.update(car.x, car.z, now);
     obstacles.update(2.5);
+    groundUniforms.tdTime.value = now / 1000;
     focus.set(car.x, car.y, car.z);
     sky.update(focus);
     sky.render(dt);
@@ -260,15 +350,15 @@ async function boot(): Promise<void> {
     if (playing && frameNo % 6 === 0) {
       const pending = tiles.pending + terrain.pendingChunks;
       const road = roads.nameAt(car.x, car.z);
-      ui.setHud(car.speed * 3.6, tiles.placeName(car.x, car.z), road, CAMS[camMode], headlights, pending > 0 ? `LOADING ${pending}` : '');
+      ui.setHud(car.speed * 3.6, tiles.placeName(car.x, car.z), inTunnel ? (road ? road + '（隧道）' : '隧道') : road, CAMS[camMode], lightsOn, pending > 0 ? `加载中 ${pending}` : '');
     }
   };
   requestAnimationFrame(loop);
 
   // ---- debug / test hooks (used by scripts/headless-check.mjs)
   (window as any).__td = {
-    car, ground, terrain, tiles, obstacles, roads, decks, roadSurface, sky, camera, renderer, fps, frame,
-    get settled() { return settled; }, get playing() { return playing; },
+    car, ground, terrain, tiles, obstacles, roads, decks, tunnels, roadSurface, vegetation, sky, camera, renderer, fps, frame, look, map,
+    get settled() { return settled; }, get playing() { return playing; }, get inTunnel() { return inTunnel; },
     teleport, recover,
     /** Test helper: snap to the nearest road of at least the given class (0 motorway … 12 living street). */
     toRoad(maxCls: number) { recover(maxCls); camHeading = car.heading; },
@@ -276,7 +366,8 @@ async function boot(): Promise<void> {
     grab() { return new Promise<{ w: number; h: number; px: Uint8Array }>((r) => grabs.push(r)); },
     hideHud(h: boolean) { document.getElementById('ui')!.style.display = h ? 'none' : ''; },
     start() { playing = true; ui.showGarage(false); },
-    setCam(i: number) { camMode = i % CAMS.length; },
+    /** 0 chase, 1 far chase, 2 cockpit, 3 hood, 4 top-down. */
+    setCam(i: number) { camMode = i % CAMS.length; look.yaw = 0; look.pitch = 0; },
     setQuality: applyQuality,
     get resScale() { return resScale; },
     get pending() { return tiles.pending + terrain.pendingChunks + obstacles.pendingJobs; },

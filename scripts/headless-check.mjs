@@ -78,10 +78,11 @@ async function drive({ metres, maxSeconds = 120, maxKmh = 50 }) {
       const clear = (ang, dist) => {
         // free distance along a ray, using the same wall test as the car
         const h = c.heading + ang; let y = c.y;
+        t.ground.surface(c.x, c.z, y); let deck = t.ground.lastOnDeck;
         for (let d = 3; d <= dist; d += 2) {
           const x = c.x + Math.sin(h) * d, z = c.z - Math.cos(h) * d;
-          if (t.ground.isWall(x, z, y, 2)) return d;
-          y = t.ground.surface(x, z, y);
+          if (t.ground.isWall(x, z, y, 2, deck)) return d;   // same rules as the car, incl. deck guardrails
+          y = t.ground.surface(x, z, y); deck = t.ground.lastOnDeck;
         }
         return dist;
       };
@@ -125,12 +126,16 @@ async function wallTest() {
     let best = null;
     for (let a = 0; a < Math.PI * 2; a += Math.PI / 24) {
       let y = c.y;
+      t.ground.surface(c.x, c.z, y); let deck = t.ground.lastOnDeck;
       for (let d = 4; d <= 80; d += 2) {
         const x = c.x + Math.sin(a) * d, z = c.z - Math.cos(a) * d;
-        const s = t.ground.surface(x, z, y);
-        if (t.obstacles.heightAt(x, z) > s + 3) { if (d > 14 && (!best || d < best.d)) best = { a, d, x, z }; break; }
-        if (t.ground.isWall(x, z, y, 2)) break;
-        y = s;
+        if (t.ground.isWall(x, z, y, 2, deck)) {
+          // only a building counts as the test wall (not a guardrail, kerb or mapped road override)
+          const s = t.ground.surface(x, z, y);
+          if (t.obstacles.heightAt(x, z) > s + 3 && d > 14 && (!best || d < best.d)) best = { a, d, x, z };
+          break;
+        }
+        y = t.ground.surface(x, z, y); deck = t.ground.lastOnDeck;
       }
     }
     if (best) { c.heading = best.a; c.speed = 0; }
@@ -174,7 +179,9 @@ if (mode === 'phase1') {
   R.start = await state();
   await shot('phase1-start');
   const d = await drive({ metres: Number(process.env.METRES ?? 550), maxSeconds: 240 });
-  const s = await state();
+  // a drop off a kerb or ramp edge is allowed; what matters is that the car lands on a surface
+  let s = await state();
+  for (let i = 0; i < 12 && s.airborne; i++) { await sleep(250); s = await state(); }
   await shot('phase1-after-drive');
   const frames = await page.evaluate(() => window.__td.renderer.info.render.frame);
   check('drive>=500m', d.metres >= 500, { metres: +d.metres.toFixed(1), seconds: +d.seconds.toFixed(1) });
@@ -183,7 +190,7 @@ if (mode === 'phase1') {
   const w = await wallTest();
   await shot('phase1-wall-stop');
   check('stops-at-wall', w.ok, w);
-  await page.evaluate(() => window.__td.setCam(3)); await sleep(800); await shot('phase1-wall-top');
+  await page.evaluate(() => window.__td.setCam(4)); await sleep(800); await shot('phase1-wall-top');
   check('fps', s.fps > 30, { fps: +s.fps.toFixed(1) });
 }
 
@@ -241,7 +248,7 @@ if (mode === 'roads') {
     await open('spawn=' + id);
     await settle(30000);
     await sleep(4500);
-    await page.evaluate(() => { const t = window.__td; t.toRoad(7); t.setCam(2); });
+    await page.evaluate(() => { const t = window.__td; t.toRoad(7); t.setCam(3); });
     await page.waitForFunction(() => window.__td.roadSurface.builtCells >= 9, null, { timeout: 60000 });
     const st = await settle(40000);
     await sleep(3000);

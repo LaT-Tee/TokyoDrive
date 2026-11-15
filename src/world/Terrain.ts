@@ -51,10 +51,72 @@ function decodeDem(bmp: ImageBitmap): Float32Array {
   return out;
 }
 
+/** Shared by every ground material: time (water animation) and the open-cut
+ *  segments of tunnel ramps, where the ground must not be drawn. */
+export const groundUniforms = {
+  tdTime: { value: 0 },
+  tdCutN: { value: 0 },
+  tdCuts: { value: Array.from({ length: 12 }, () => new THREE.Vector4()) }, // ax, az, bx, bz
+  tdCutW: { value: new Float32Array(12) },                                    // half width
+};
+const noWater = new THREE.DataTexture(new Uint8Array([0]), 1, 1, THREE.RedFormat);
+noWater.needsUpdate = true;
+
+/** Ground material: photo colour + close-up detail noise, animated water where the
+ *  elevation model marks water, and discarded fragments over tunnel ramps. */
+function groundMaterial(water: THREE.Texture | null): THREE.MeshLambertMaterial {
+  const mat = new THREE.MeshLambertMaterial({ color: 0x8a8f86 });
+  mat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, groundUniforms, { tdWater: { value: water ?? noWater } });
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 tdWP; varying vec2 tdUv;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n tdWP = (modelMatrix * vec4(position, 1.0)).xyz; tdUv = uv;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying vec3 tdWP; varying vec2 tdUv;
+        uniform sampler2D tdWater; uniform float tdTime; uniform int tdCutN; uniform vec4 tdCuts[12]; uniform float tdCutW[12];
+        float tdHash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float tdNoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(tdHash(i), tdHash(i + vec2(1, 0)), f.x), mix(tdHash(i + vec2(0, 1)), tdHash(i + vec2(1, 1)), f.x), f.y); }`)
+      .replace('#include <map_fragment>', `
+        for (int i = 0; i < 12; i++) {
+          if (i >= tdCutN) break;
+          vec2 a = tdCuts[i].xy, b = tdCuts[i].zw, ab = b - a;
+          float t = clamp(dot(tdWP.xz - a, ab) / max(dot(ab, ab), 1e-4), 0.0, 1.0);
+          if (distance(tdWP.xz, a + ab * t) < tdCutW[i]) discard;
+        }
+        #include <map_fragment>
+        {
+          float dist = distance(tdWP, cameraPosition);
+          float near = 1.0 - smoothstep(25.0, 120.0, dist);
+          // the photo is ~0.3-1 m per pixel: break up the blur close to the camera
+          float fine = tdNoise(tdWP.xz * 9.0) * 0.6 + tdNoise(tdWP.xz * 31.0) * 0.4;
+          float coarse = tdNoise(tdWP.xz * 0.9);
+          float green = smoothstep(0.02, 0.10, diffuseColor.g - max(diffuseColor.r, diffuseColor.b));
+          diffuseColor.rgb *= 1.0 + near * ((fine - 0.5) * (0.22 + 0.25 * green) + (coarse - 0.5) * 0.12);
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.78, 1.0, 0.62), green * near * 0.35);
+          float w = smoothstep(0.35, 0.65, texture2D(tdWater, tdUv).r);
+          if (w > 0.0) {
+            vec2 q = tdWP.xz * 0.12;
+            float r1 = tdNoise(q + vec2(tdTime * 0.35, tdTime * 0.21)), r2 = tdNoise(q * 2.7 - vec2(tdTime * 0.27, tdTime * 0.4));
+            float ripple = r1 * 0.6 + r2 * 0.4;
+            vec3 deep = vec3(0.020, 0.060, 0.085), shallow = vec3(0.05, 0.13, 0.15);
+            vec3 wc = mix(deep, shallow, ripple) + vec3(0.35, 0.38, 0.4) * pow(ripple, 7.0) * (0.4 + 0.6 * near);
+            diffuseColor.rgb = mix(diffuseColor.rgb, wc, w);
+          }
+        }`);
+  };
+  mat.customProgramCacheKey = () => 'td-ground';
+  return mat;
+}
+
 interface Chunk {
   tx: number; ty: number; key: string;
   heights: Float32Array | null; // local Y at V x V vertices
   mesh: THREE.Mesh | null;
+  water: THREE.DataTexture | null;   // 256x256 mask, 255 = water
+  waterMask: Uint8Array | null;
+  veg: Uint8Array | null;            // 256x256 classes from the photo: 0 none, 1 grass, 2 tree canopy
   texLevel: number; // zoom of the ortho currently applied (0 = none)
   texLoading: boolean;
   texWant: number; // level of the last attempt (avoids retry storms on partial coverage)
@@ -127,7 +189,7 @@ export class Terrain {
       let c = this.chunks.get(key);
       if (!c) {
         if (this.loading >= 3) { pending++; continue; }
-        c = { tx, ty, key, heights: null, mesh: null, texLevel: 0, texLoading: false, texWant: 0, disposed: false };
+        c = { tx, ty, key, heights: null, mesh: null, water: null, waterMask: null, veg: null, texLevel: 0, texLoading: false, texWant: 0, disposed: false };
         this.chunks.set(key, c);
         void this.loadChunk(c);
       }
@@ -150,7 +212,7 @@ export class Terrain {
       this.group.remove(c.mesh);
       c.mesh.geometry.dispose();
       const m = c.mesh.material as THREE.MeshLambertMaterial;
-      m.map?.dispose(); m.dispose();
+      m.map?.dispose(); m.dispose(); c.water?.dispose();
     }
   }
 
@@ -171,16 +233,27 @@ export class Terrain {
       const bmp = await loadBitmap(this.sources.dem, Z, c.tx, c.ty);
       let dem = bmp ? decodeDem(bmp) : new Float32Array(65536).fill(NA);
       bmp?.close();
-      let hasNA = false;
-      for (let i = 0; i < 65536; i++) if (dem[i] === NA) { hasNA = true; break; }
-      if (hasNA) {
+      let naCount = 0;
+      for (let i = 0; i < 65536; i++) if (dem[i] === NA) naCount++;
+      if (naCount) {
         const f = await this.demFill(c.tx >> 1, c.ty >> 1);
         const ox = (c.tx & 1) * 128, oy = (c.ty & 1) * 128;
+        // The 5 m model leaves water bodies empty. If the whole tile is empty the 5 m
+        // survey simply does not cover it, so only the 10 m model's gaps (sea) count.
+        const surveyed = naCount < 65536 * 0.98;
+        const mask = new Uint8Array(65536);
+        let wet = 0;
         for (let j = 0; j < 256; j++) for (let i = 0; i < 256; i++) {
           const k = j * 256 + i;
           if (dem[k] !== NA) continue;
           const v = f ? f[(oy + (j >> 1)) * 256 + ox + (i >> 1)] : NA;
+          if (surveyed || v === NA) { mask[(255 - j) * 256 + i] = 255; wet++; } // texture rows are bottom-up
           dem[k] = v === NA ? 0 : v; // open water -> sea level
+        }
+        if (wet > 12) {
+          c.waterMask = mask;
+          c.water = new THREE.DataTexture(mask, 256, 256, THREE.RedFormat);
+          c.water.magFilter = THREE.LinearFilter; c.water.minFilter = THREE.LinearFilter; c.water.needsUpdate = true;
         }
       }
       if (c.disposed) return;
@@ -241,7 +314,7 @@ export class Terrain {
     geo.setIndex(idx);
     geo.computeVertexNormals();
     geo.computeBoundingSphere();
-    const mat = new THREE.MeshLambertMaterial({ color: 0x8a8f86 });
+    const mat = groundMaterial(c.water);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(center.x, 0, center.z);
     mesh.matrixAutoUpdate = false; mesh.updateMatrix();
@@ -267,6 +340,7 @@ export class Terrain {
       }
       await Promise.all(jobs);
       if (c.disposed || !c.mesh || ok === 0) return;
+      if (level >= 16 && !c.veg) c.veg = this.classifyVegetation(canvas, c.waterMask);
       const tex = new THREE.CanvasTexture(canvas);
       tex.colorSpace = THREE.SRGBColorSpace;
       tex.anisotropy = this.maxAniso;
@@ -276,6 +350,34 @@ export class Terrain {
       m.map = tex; m.color.set(0xb8b8b8); m.needsUpdate = true;
       c.texLevel = level;
     } finally { c.texLoading = false; }
+  }
+
+  /** Reads vegetation from the photo itself: green, dark pixels are tree canopy, lighter green is grass. */
+  private classifyVegetation(canvas: HTMLCanvasElement, water: Uint8Array | null): Uint8Array {
+    const ctx = scratch!.getContext('2d', { willReadFrequently: true })!;
+    ctx.clearRect(0, 0, 256, 256);
+    ctx.drawImage(canvas, 0, 0, 256, 256);
+    const d = ctx.getImageData(0, 0, 256, 256).data, out = new Uint8Array(65536);
+    for (let j = 0; j < 256; j++) for (let i = 0; i < 256; i++) {
+      const k = j * 256 + i, r = d[k * 4], g = d[k * 4 + 1], b = d[k * 4 + 2];
+      if (water && water[(255 - j) * 256 + i]) continue;
+      if (g > r + 8 && g > b + 14) out[k] = 0.3 * r + 0.59 * g + 0.11 * b < 105 ? 2 : 1;
+    }
+    return out;
+  }
+
+  /** Vegetation class read from the photo at local (x, z): 0 none, 1 grass, 2 trees, -1 unknown yet. */
+  vegAt(x: number, z: number, refY = 40): number {
+    const q = this.chunkAt(x, z, refY);
+    if (!q.c?.veg) return -1;
+    return q.c.veg[Math.min(255, Math.floor(q.v * 256)) * 256 + Math.min(255, Math.floor(q.u * 256))];
+  }
+
+  /** True where the elevation model marks open water. */
+  isWater(x: number, z: number, refY = 40): boolean {
+    const q = this.chunkAt(x, z, refY);
+    const m = q.c?.waterMask;
+    return !!m && m[(255 - Math.min(255, Math.floor(q.v * 256))) * 256 + Math.min(255, Math.floor(q.u * 256))] > 0;
   }
 
   // ---------------------------------------------------------- safety ground
@@ -320,7 +422,8 @@ export class Terrain {
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     geo.setIndex(idx); geo.computeVertexNormals();
-    const mat = new THREE.MeshLambertMaterial({ color: 0x6f7a6c });
+    const mat = groundMaterial(null);
+    mat.color.set(0x6f7a6c);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = 'safety-ground'; mesh.frustumCulled = false; mesh.renderOrder = -1;
     this.group.add(mesh);

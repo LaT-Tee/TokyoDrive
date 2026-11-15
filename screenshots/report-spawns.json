@@ -2,12 +2,12 @@
  "mode": "spawns",
  "base": "http://localhost:5173",
  "quality": "balanced",
- "date": "2026-11-15T13:46:39.376Z",
+ "date": "2026-11-15T23:29:26.304Z",
  "results": {
   "spawn-shinjuku": {
    "pass": true,
    "settle": {
-    "waitedMs": 1781,
+    "waitedMs": 19306,
     "pending": 0,
     "terrainReady": true
    },
@@ -25,7 +25,7 @@
   "spawn-tokyo": {
    "pass": true,
    "settle": {
-    "waitedMs": 18252,
+    "waitedMs": 29311,
     "pending": 0,
     "terrainReady": true
    },
@@ -43,7 +43,7 @@
   "spawn-fuchu": {
    "pass": true,
    "settle": {
-    "waitedMs": 3822,
+    "waitedMs": 2790,
     "pending": 0,
     "terrainReady": true
    },
@@ -61,7 +61,7 @@
   "spawn-tachikawa": {
    "pass": true,
    "settle": {
-    "waitedMs": 8341,
+    "waitedMs": 10956,
     "pending": 0,
     "terrainReady": true
    },
@@ -79,7 +79,7 @@
   "spawn-minatomirai": {
    "pass": true,
    "settle": {
-    "waitedMs": 11508,
+    "waitedMs": 9967,
     "pending": 0,
     "terrainReady": true
    },
@@ -97,14 +97,14 @@
   "spawn-rainbow": {
    "pass": true,
    "settle": {
-    "waitedMs": 16002,
+    "waitedMs": 12422,
     "pending": 0,
     "terrainReady": true
    },
    "holes": 0,
-   "y": 31.2,
+   "y": 97.8,
    "lat": 35.63654,
-   "lon": 139.76353,
+   "lon": 139.76352,
    "shots": [
     "spawn-rainbow-0.jpg",
     "spawn-rainbow-90.jpg",

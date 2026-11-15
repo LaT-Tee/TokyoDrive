@@ -1,5 +1,5 @@
 {
- "generated": "2026-11-15T12:57:56.676Z",
+ "generated": "2026-11-15T14:29:49.015Z",
  "source": "https://api.plateauview.mlit.go.jp/datacatalog/plateau-datasets",
  "bounds": {
   "west": 139.33,
@@ -43,6 +43,40 @@
    }
   },
   {
+   "id": "13101_veg_PlantCover_lod3",
+   "cityCode": "13101",
+   "city": "千代田区",
+   "type": "veg",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13101-veg-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/a2/23b39e-ebf6-4b09-a957-3f9de7ec6dd8/13101_chiyoda-ku_pref_2025_citygml_1_op_veg_PlantCover_3dtiles_lod3/tileset.json",
+   "fileSize": 15576963,
+   "bounds": {
+    "west": 139.731175,
+    "south": 35.669656,
+    "east": 139.782661,
+    "north": 35.705095
+   }
+  },
+  {
+   "id": "13101_frn_lod3",
+   "cityCode": "13101",
+   "city": "千代田区",
+   "type": "frn",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13101-frn-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/1d/ce83e7-3781-4f35-9045-c781d4f72013/13101_chiyoda-ku_pref_2025_citygml_1_op_frn_3dtiles_lod3/tileset.json",
+   "fileSize": 29849008,
+   "bounds": {
+    "west": 139.731175,
+    "south": 35.669656,
+    "east": 139.782661,
+    "north": 35.705095
+   }
+  },
+  {
    "id": "13102_bldg_lod2",
    "cityCode": "13102",
    "city": "中央区",
@@ -69,6 +103,40 @@
    "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13102-brid-lod2-texture-latest/tileset.json",
    "assetUrl": "https://assets.cms.plateau.reearth.io/assets/2f/77dc90-7824-4349-924a-f5f862c430d4/13102_chuo-ku_pref_2025_citygml_1_op_brid_3dtiles_lod2/tileset.json",
    "fileSize": 63391204,
+   "bounds": {
+    "west": 139.754317,
+    "south": 35.646043,
+    "east": 139.792752,
+    "north": 35.696571
+   }
+  },
+  {
+   "id": "13102_veg_PlantCover_lod3",
+   "cityCode": "13102",
+   "city": "中央区",
+   "type": "veg",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13102-veg-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/f0/879ebe-f0ab-4f1e-87b1-fb8c2839d3ce/13102_chuo-ku_pref_2025_citygml_1_op_veg_PlantCover_3dtiles_lod3/tileset.json",
+   "fileSize": 15423950,
+   "bounds": {
+    "west": 139.754317,
+    "south": 35.646043,
+    "east": 139.792752,
+    "north": 35.696571
+   }
+  },
+  {
+   "id": "13102_frn_lod3",
+   "cityCode": "13102",
+   "city": "中央区",
+   "type": "frn",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13102-frn-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/ec/f1c5d7-6508-4809-8c6a-fb953933766d/13102_chuo-ku_pref_2025_citygml_1_op_frn_3dtiles_lod3/tileset.json",
+   "fileSize": 32968336,
    "bounds": {
     "west": 139.754317,
     "south": 35.646043,
@@ -111,6 +179,40 @@
    }
   },
   {
+   "id": "13103_veg_PlantCover_lod3",
+   "cityCode": "13103",
+   "city": "港区",
+   "type": "veg",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13103-veg-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/34/06f5a2-d8d2-4b88-a421-10d71e2b57e1/13103_minato-ku_pref_2025_citygml_1_op_veg_PlantCover_3dtiles_lod3/tileset.json",
+   "fileSize": 586534,
+   "bounds": {
+    "west": 139.708705,
+    "south": 35.623138,
+    "east": 139.782376,
+    "north": 35.68281
+   }
+  },
+  {
+   "id": "13103_frn_lod3",
+   "cityCode": "13103",
+   "city": "港区",
+   "type": "frn",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13103-frn-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/d7/01868c-2598-405b-9449-19d1ffee7295/13103_minato-ku_pref_2025_citygml_1_op_frn_3dtiles_lod3/tileset.json",
+   "fileSize": 52246344,
+   "bounds": {
+    "west": 139.708705,
+    "south": 35.623138,
+    "east": 139.782376,
+    "north": 35.68281
+   }
+  },
+  {
    "id": "13104_bldg_lod2",
    "cityCode": "13104",
    "city": "新宿区",
@@ -137,6 +239,40 @@
    "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13104-brid-lod2-texture-latest/tileset.json",
    "assetUrl": "https://assets.cms.plateau.reearth.io/assets/b6/517a79-3af1-4c70-b7e1-01accf55e3f5/13104_shinjuku-ku_pref_2025_citygml_1_op_brid_3dtiles_lod2/tileset.json",
    "fileSize": 6649584,
+   "bounds": {
+    "west": 139.673494,
+    "south": 35.673433,
+    "east": 139.74587,
+    "north": 35.72952
+   }
+  },
+  {
+   "id": "13104_veg_PlantCover_lod3",
+   "cityCode": "13104",
+   "city": "新宿区",
+   "type": "veg",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13104-veg-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/fb/650c98-a675-4675-97fa-eb67bee76717/13104_shinjuku-ku_pref_2025_citygml_1_op_veg_PlantCover_3dtiles_lod3/tileset.json",
+   "fileSize": 12743241,
+   "bounds": {
+    "west": 139.673494,
+    "south": 35.673433,
+    "east": 139.74587,
+    "north": 35.72952
+   }
+  },
+  {
+   "id": "13104_frn_lod3",
+   "cityCode": "13104",
+   "city": "新宿区",
+   "type": "frn",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13104-frn-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/73/b39ed2-77ae-43fd-a874-6d24f22d8cd2/13104_shinjuku-ku_pref_2025_citygml_1_op_frn_3dtiles_lod3/tileset.json",
+   "fileSize": 9469249,
    "bounds": {
     "west": 139.673494,
     "south": 35.673433,
@@ -213,6 +349,40 @@
    }
   },
   {
+   "id": "13106_veg_PlantCover_lod2",
+   "cityCode": "13106",
+   "city": "台東区",
+   "type": "veg",
+   "lod": 2,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13106-veg-lod2-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/04/f6e75a-126c-4e4f-bd78-f7cc8758ee74/13106_taito-ku_city_2025_citygml_1_op_veg_PlantCover_3dtiles_lod2/tileset.json",
+   "fileSize": 135553,
+   "bounds": {
+    "west": 139.763214,
+    "south": 35.694704,
+    "east": 139.809719,
+    "north": 35.731218
+   }
+  },
+  {
+   "id": "13106_frn_lod3",
+   "cityCode": "13106",
+   "city": "台東区",
+   "type": "frn",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13106-frn-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/27/ead7d6-3da8-4545-b901-e6edf358d28a/13106_taito-ku_city_2025_citygml_1_op_frn_3dtiles_lod3/tileset.json",
+   "fileSize": 84276030,
+   "bounds": {
+    "west": 139.763214,
+    "south": 35.694704,
+    "east": 139.809719,
+    "north": 35.731218
+   }
+  },
+  {
    "id": "13107_bldg_lod2",
    "cityCode": "13107",
    "city": "墨田区",
@@ -239,6 +409,40 @@
    "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13107-brid-lod2-texture-latest/tileset.json",
    "assetUrl": "https://assets.cms.plateau.reearth.io/assets/08/0097e5-dc1f-4264-bf92-c84343e81c8f/13107_sumida-ku_pref_2025_citygml_1_op_brid_3dtiles_lod2/tileset.json",
    "fileSize": 1888549,
+   "bounds": {
+    "west": 139.788915,
+    "south": 35.686993,
+    "east": 139.842155,
+    "north": 35.743429
+   }
+  },
+  {
+   "id": "13107_veg_PlantCover_lod3",
+   "cityCode": "13107",
+   "city": "墨田区",
+   "type": "veg",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13107-veg-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/b2/e3365d-ba5f-4138-9d9d-9c84276b2650/13107_sumida-ku_city_2025_citygml_1_op_veg_PlantCover_3dtiles_lod3/tileset.json",
+   "fileSize": 40386,
+   "bounds": {
+    "west": 139.788915,
+    "south": 35.686993,
+    "east": 139.842155,
+    "north": 35.743429
+   }
+  },
+  {
+   "id": "13107_frn_lod3",
+   "cityCode": "13107",
+   "city": "墨田区",
+   "type": "frn",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13107-frn-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/ae/be03ed-f5b7-4530-8b02-8b171bbcd0e3/13107_sumida-ku_pref_2025_citygml_1_op_frn_3dtiles_lod3/tileset.json",
+   "fileSize": 15632836,
    "bounds": {
     "west": 139.788915,
     "south": 35.686993,
@@ -281,6 +485,40 @@
    }
   },
   {
+   "id": "13108_veg_PlantCover_lod2",
+   "cityCode": "13108",
+   "city": "江東区",
+   "type": "veg",
+   "lod": 2,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13108-veg-lod2-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/c7/2904f0-0016-4691-884a-8762f06f2d0b/13108_koto-ku_pref_2025_citygml_1_op_veg_PlantCover_3dtiles_lod2/tileset.json",
+   "fileSize": 45791,
+   "bounds": {
+    "west": 139.77135,
+    "south": 35.592182,
+    "east": 139.847706,
+    "north": 35.708008
+   }
+  },
+  {
+   "id": "13108_frn_lod3",
+   "cityCode": "13108",
+   "city": "江東区",
+   "type": "frn",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13108-frn-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/9d/59d264-4cd6-4d3c-808a-7df372799cfe/13108_koto-ku_pref_2025_citygml_1_op_frn_3dtiles_lod3/tileset.json",
+   "fileSize": 14295615,
+   "bounds": {
+    "west": 139.77135,
+    "south": 35.592182,
+    "east": 139.847706,
+    "north": 35.708008
+   }
+  },
+  {
    "id": "13109_bldg_lod2",
    "cityCode": "13109",
    "city": "品川区",
@@ -307,6 +545,23 @@
    "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13109-brid-lod2-texture-latest/tileset.json",
    "assetUrl": "https://assets.cms.plateau.reearth.io/assets/46/3c7ed9-452b-4210-980f-5cdb3bc9b3c3/13109_shinagawa-ku_pref_2025_citygml_1_op_brid_3dtiles_lod2/tileset.json",
    "fileSize": 6931059,
+   "bounds": {
+    "west": 139.695546,
+    "south": 35.58493,
+    "east": 139.773149,
+    "north": 35.641661
+   }
+  },
+  {
+   "id": "13109_frn_lod3",
+   "cityCode": "13109",
+   "city": "品川区",
+   "type": "frn",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13109-frn-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/d5/37a3b4-4287-4fee-94e8-476528d51e5c/13109_shinagawa-ku_pref_2025_citygml_1_op_frn_3dtiles_lod3/tileset.json",
+   "fileSize": 8275227,
    "bounds": {
     "west": 139.695546,
     "south": 35.58493,
@@ -434,6 +689,40 @@
    }
   },
   {
+   "id": "13113_veg_PlantCover_lod3",
+   "cityCode": "13113",
+   "city": "渋谷区",
+   "type": "veg",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13113-veg-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/fc/69b3bb-6a85-47f3-b4f0-abdb1da381ef/13113_shibuya-ku_pref_2025_citygml_1_op_veg_PlantCover_3dtiles_lod3/tileset.json",
+   "fileSize": 699711,
+   "bounds": {
+    "west": 139.661595,
+    "south": 35.641686,
+    "east": 139.72356,
+    "north": 35.69197
+   }
+  },
+  {
+   "id": "13113_frn_lod3",
+   "cityCode": "13113",
+   "city": "渋谷区",
+   "type": "frn",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13113-frn-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/ec/00bf52-fdbf-4c0c-8ed8-3a9e1f5ea146/13113_shibuya-ku_pref_2025_citygml_1_op_frn_3dtiles_lod3/tileset.json",
+   "fileSize": 5896049,
+   "bounds": {
+    "west": 139.661595,
+    "south": 35.641686,
+    "east": 139.72356,
+    "north": 35.69197
+   }
+  },
+  {
    "id": "13114_bldg_lod2",
    "cityCode": "13114",
    "city": "中野区",
@@ -485,6 +774,23 @@
    }
   },
   {
+   "id": "13115_frn_lod3",
+   "cityCode": "13115",
+   "city": "杉並区",
+   "type": "frn",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13115-frn-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/8f/e1933b-d52d-4f70-a1f5-ec89b748558d/13115_suginami-ku_city_2025_citygml_1_op_frn_3dtiles_lod3/tileset.json",
+   "fileSize": 7690503,
+   "bounds": {
+    "west": 139.585794,
+    "south": 35.666645,
+    "east": 139.667769,
+    "north": 35.730146
+   }
+  },
+  {
    "id": "13116_bldg_lod2",
    "cityCode": "13116",
    "city": "豊島区",
@@ -511,6 +817,40 @@
    "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13116-brid-lod2-texture-latest/tileset.json",
    "assetUrl": "https://assets.cms.plateau.reearth.io/assets/e4/d3e680-9cd2-40d1-9def-87ec252a92d4/13116_toshima-ku_pref_2025_citygml_1_op_brid_3dtiles_lod2/tileset.json",
    "fileSize": 6493779,
+   "bounds": {
+    "west": 139.677344,
+    "south": 35.712266,
+    "east": 139.75276,
+    "north": 35.745793
+   }
+  },
+  {
+   "id": "13116_veg_PlantCover_lod3",
+   "cityCode": "13116",
+   "city": "豊島区",
+   "type": "veg",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13116-veg-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/dd/765a11-e234-4c93-b305-c61fd0f9bbe9/13116_toshima-ku_pref_2025_citygml_1_op_veg_PlantCover_3dtiles_lod3/tileset.json",
+   "fileSize": 21143096,
+   "bounds": {
+    "west": 139.677344,
+    "south": 35.712266,
+    "east": 139.75276,
+    "north": 35.745793
+   }
+  },
+  {
+   "id": "13116_frn_lod3",
+   "cityCode": "13116",
+   "city": "豊島区",
+   "type": "frn",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13116-frn-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/c0/c75580-f382-4dc6-8c50-97900c3cbfcb/13116_toshima-ku_pref_2025_citygml_1_op_frn_3dtiles_lod3/tileset.json",
+   "fileSize": 13581722,
    "bounds": {
     "west": 139.677344,
     "south": 35.712266,
@@ -723,6 +1063,40 @@
    }
   },
   {
+   "id": "13202_veg_PlantCover_lod2",
+   "cityCode": "13202",
+   "city": "立川市",
+   "type": "veg",
+   "lod": 2,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13202-veg-lod2-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/c1/09f953-3455-4971-b0ea-5d00c8d4db53/13202_tachikawa-shi_pref_2025_citygml_1_op_veg_PlantCover_3dtiles_lod2/tileset.json",
+   "fileSize": 82029,
+   "bounds": {
+    "west": 139.352926,
+    "south": 35.682761,
+    "east": 139.446122,
+    "north": 35.745135
+   }
+  },
+  {
+   "id": "13202_frn_lod3",
+   "cityCode": "13202",
+   "city": "立川市",
+   "type": "frn",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13202-frn-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/e0/fa8e14-b073-4e69-aaab-b5b81df41b39/13202_tachikawa-shi_pref_2025_citygml_1_op_frn_3dtiles_lod3/tileset.json",
+   "fileSize": 14033033,
+   "bounds": {
+    "west": 139.352926,
+    "south": 35.682761,
+    "east": 139.446122,
+    "north": 35.745135
+   }
+  },
+  {
    "id": "13203_bldg_lod2",
    "cityCode": "13203",
    "city": "武蔵野市",
@@ -800,6 +1174,40 @@
    "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13209-bldg-lod2-texture-latest/tileset.json",
    "assetUrl": "https://assets.cms.plateau.reearth.io/assets/2f/2ad03e-01f7-412d-893b-06b72fedf68a/13209_machida-shi_pref_2025_citygml_1_op_bldg_3dtiles_lod2/tileset.json",
    "fileSize": 97904480,
+   "bounds": {
+    "west": 139.268799,
+    "south": 35.502312,
+    "east": 139.507591,
+    "north": 35.623504
+   }
+  },
+  {
+   "id": "13209_veg_PlantCover_lod2",
+   "cityCode": "13209",
+   "city": "町田市",
+   "type": "veg",
+   "lod": 2,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13209-veg-lod2-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/b9/b45617-0879-4fbf-af1b-11f118b23504/13209_machida-shi_pref_2025_citygml_1_op_veg_PlantCover_3dtiles_lod2/tileset.json",
+   "fileSize": 3746,
+   "bounds": {
+    "west": 139.268799,
+    "south": 35.502312,
+    "east": 139.507591,
+    "north": 35.623504
+   }
+  },
+  {
+   "id": "13209_frn_lod3",
+   "cityCode": "13209",
+   "city": "町田市",
+   "type": "frn",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13209-frn-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/52/5c6913-adbd-499e-851b-327ccdb495ed/13209_machida-shi_pref_2025_citygml_1_op_frn_3dtiles_lod3/tileset.json",
+   "fileSize": 10794993,
    "bounds": {
     "west": 139.268799,
     "south": 35.502312,
@@ -1046,6 +1454,40 @@
    }
   },
   {
+   "id": "13224_veg_PlantCover_lod2",
+   "cityCode": "13224",
+   "city": "多摩市",
+   "type": "veg",
+   "lod": 2,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13224-veg-lod2-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/71/6f87e7-6f3c-434b-b63b-d45b1c3e63b0/13224_tama-shi_pref_2025_citygml_1_op_veg_PlantCover_3dtiles_lod2/tileset.json",
+   "fileSize": 61266,
+   "bounds": {
+    "west": 139.393901,
+    "south": 35.604698,
+    "east": 139.473807,
+    "north": 35.65796
+   }
+  },
+  {
+   "id": "13224_frn_lod3",
+   "cityCode": "13224",
+   "city": "多摩市",
+   "type": "frn",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13224-frn-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/0e/049638-c2a9-4b5b-97a5-1645cbd3bff4/13224_tama-shi_pref_2025_citygml_1_op_frn_3dtiles_lod3/tileset.json",
+   "fileSize": 9220699,
+   "bounds": {
+    "west": 139.393901,
+    "south": 35.604698,
+    "east": 139.473807,
+    "north": 35.65796
+   }
+  },
+  {
    "id": "13225_bldg_lod2",
    "cityCode": "13225",
    "city": "稲城市",
@@ -1089,6 +1531,57 @@
    "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/14100-brid-lod2-texture-latest/tileset.json",
    "assetUrl": null,
    "fileSize": 14784728,
+   "bounds": {
+    "west": 139.464783,
+    "south": 35.312502,
+    "east": 139.725328,
+    "north": 35.592504
+   }
+  },
+  {
+   "id": "14100_veg_SolitaryVegetationObject_lod2",
+   "cityCode": "14100",
+   "city": "横浜市",
+   "type": "veg",
+   "lod": 2,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/14100-veg-lod2-texture-latest/tileset.json",
+   "assetUrl": null,
+   "fileSize": 51917,
+   "bounds": {
+    "west": 139.464783,
+    "south": 35.312502,
+    "east": 139.725328,
+    "north": 35.592504
+   }
+  },
+  {
+   "id": "14100_veg_PlantCover_lod3",
+   "cityCode": "14100",
+   "city": "横浜市",
+   "type": "veg",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/14100-veg-lod3-texture-latest/tileset.json",
+   "assetUrl": null,
+   "fileSize": 1014171,
+   "bounds": {
+    "west": 139.464783,
+    "south": 35.312502,
+    "east": 139.725328,
+    "north": 35.592504
+   }
+  },
+  {
+   "id": "14100_frn_lod3",
+   "cityCode": "14100",
+   "city": "横浜市",
+   "type": "frn",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/14100-frn-lod3-texture-latest/tileset.json",
+   "assetUrl": null,
+   "fileSize": 59963060,
    "bounds": {
     "west": 139.464783,
     "south": 35.312502,

@@ -17,7 +17,7 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 export interface ManifestTileset {
   id: string; cityCode: string; city: string;
-  type: 'bldg' | 'brid' | 'tran';
+  type: 'bldg' | 'brid' | 'tran' | 'veg' | 'frn';
   lod: number; texture: boolean;
   /** Self-hosted URL relative to the data base, when downloaded. */
   url?: string;
@@ -73,6 +73,9 @@ class TextureLimitPlugin {
         if (t) seen.add(t);
       }
     });
+    // Several textures can share one decoded image: resize each image once and never
+    // close the original while another texture may still point at it.
+    const resized = new Map<object, Promise<ImageBitmap | null>>();
     await Promise.all([...seen].map(async (t) => {
       t.anisotropy = this.owner.anisotropy;
       t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
@@ -80,15 +83,54 @@ class TextureLimitPlugin {
       if (!img || !(img as any).width) return;
       const w = (img as any).width as number, h = (img as any).height as number;
       const k = Math.min(1, max / Math.max(w, h));
-      if (k >= 1) { t.needsUpdate = true; return; }
-      try {
-        const small = await createImageBitmap(img as any, { resizeWidth: Math.max(1, Math.round(w * k)), resizeHeight: Math.max(1, Math.round(h * k)), resizeQuality: 'high' });
-        (img as any).close?.();
-        t.image = small;
-      } catch { /* keep the original */ }
+      if (k < 1) {
+        let job = resized.get(img);
+        if (!job) {
+          job = createImageBitmap(img as any, { resizeWidth: Math.max(1, Math.round(w * k)), resizeHeight: Math.max(1, Math.round(h * k)), resizeQuality: 'high' }).catch(() => null);
+          resized.set(img, job);
+        }
+        const small = await job;
+        if (small) t.image = small;
+      }
       t.needsUpdate = true;
     }));
   }
+}
+
+/** Procedural facade for buildings that PLATEAU publishes without textures (most of
+ *  the Tama area and outer Yokohama): a window grid in world space with a
+ *  per-building wall tint, so they do not read as blank white boxes. */
+function applyFacade(mat: THREE.MeshStandardMaterial): void {
+  mat.color.setRGB(1, 1, 1);
+  mat.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float _batchid;\nvarying vec3 tdWP; varying vec3 tdWN; varying float tdSeed;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n tdWP = (modelMatrix * vec4(position, 1.0)).xyz; tdWN = normalize(mat3(modelMatrix) * normal);\n tdSeed = fract(sin(_batchid * 12.9898 + modelMatrix[3].x * 0.0137 + modelMatrix[3].z * 0.0071) * 43758.5453);');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 tdWP; varying vec3 tdWN; varying float tdSeed;\nfloat tdHash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        {
+          vec3 n = normalize(tdWN);
+          // wall tint per building: concrete, beige, warm grey, light brick
+          vec3 wall = mix(vec3(0.30, 0.29, 0.27), vec3(0.40, 0.36, 0.30), fract(tdSeed * 7.0));
+          wall = mix(wall, vec3(0.34, 0.25, 0.20), step(0.82, tdSeed));
+          wall = mix(wall, vec3(0.42, 0.42, 0.42), step(tdSeed, 0.15));
+          if (abs(n.y) < 0.55) {
+            float u = dot(tdWP.xz, vec2(-n.z, n.x));
+            vec2 cell = vec2(u / (1.7 + 0.9 * fract(tdSeed * 3.0)), tdWP.y / 3.0);
+            vec2 f = fract(cell);
+            float aa = max(fwidth(cell.x), fwidth(cell.y));
+            float win = smoothstep(0.16 - aa, 0.16 + aa, f.x) * smoothstep(0.84 + aa, 0.84 - aa, f.x) * smoothstep(0.30 - aa, 0.30 + aa, f.y) * smoothstep(0.80 + aa, 0.80 - aa, f.y);
+            win *= 1.0 - smoothstep(0.25, 0.7, aa);           // fade the grid out in the distance (no moire)
+            float g = tdHash(floor(cell) + tdSeed * 91.0);
+            vec3 glass = mix(vec3(0.035, 0.05, 0.07), vec3(0.11, 0.15, 0.2), g);
+            diffuseColor.rgb = mix(wall, glass, win);
+          } else {
+            diffuseColor.rgb = wall * 0.8;                     // roofs
+          }
+        }`);
+  };
+  mat.customProgramCacheKey = () => 'td-facade';
 }
 
 interface Entry {
@@ -118,6 +160,11 @@ export class TilesManager implements DeckProvider {
   // Tiles are culled against a copy of the game camera with a short far plane, so
   // nothing beyond loadDistance (or outside the view) is ever requested.
   private cullCamera = new THREE.PerspectiveCamera();
+  // A second camera looking straight down at the car keeps every tile within nearRange
+  // loaded and in the scene, whatever the view direction: shadows and collision around
+  // the car must not depend on where the player happens to look.
+  private nearCamera = new THREE.PerspectiveCamera();
+  nearRange = 280;
   private lastUpdate = -1e9; private lastFull = -1e9; private idle = false;
   loadErrors = 0;
   /** Called for every loaded bridge mesh (for deck-coverage tests). */
@@ -166,20 +213,30 @@ export class TilesManager implements DeckProvider {
     tiles.errorTarget = this.errorTarget;
     tiles.setCamera(this.cullCamera);
     tiles.setResolutionFromRenderer(this.cullCamera, this.renderer);
+    tiles.setCamera(this.nearCamera);
+    tiles.setResolutionFromRenderer(this.nearCamera, this.renderer);
     const isBridge = e.def.type === 'brid';
     const world = new THREE.Matrix4();
     tiles.addEventListener('load-model', (ev: any) => {
       const scene = ev.scene as THREE.Object3D;
+      const coarse = e.def.type === 'bldg' && (ev.tile?.children?.length ?? 0) > 0 && (ev.tile?.geometricError ?? 0) >= 1;
       scene.updateMatrix();
       scene.traverse((o) => {
         const m = o as THREE.Mesh;
         if (!m.isMesh) return;
         m.castShadow = true; m.receiveShadow = true;
+        // PLATEAU's intermediate tiles are heavily simplified stand-ins (blocky shapes,
+        // stretched textures, footprints that spill onto roads). Never show them and never
+        // let them into the collision grid: only the real leaf models count.
+        if (coarse) { m.visible = false; return; }
         // PLATEAU materials ship with roughness 0 (mirror-like); make them matte
         for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
           const s = mat as THREE.MeshStandardMaterial;
           if ('roughness' in s) { s.roughness = 0.9; s.metalness = 0; }
-          if (!s.map && 'color' in s) s.color.setRGB(0.78, 0.78, 0.76);
+          if (!s.map && 'color' in s) {
+            if (e.def.type === 'bldg') applyFacade(s);
+            else s.color.setRGB(0.34, 0.32, 0.3); // untextured: dim to balance against photo-textured tiles
+          }
         }
         // world matrix in the local frame (scene.matrix is the tile's ECEF transform)
         world.identity();
@@ -224,6 +281,18 @@ export class TilesManager implements DeckProvider {
     if (this.lru) { this.lru.minBytesSize = gb * 0.8 * 2 ** 30; this.lru.maxBytesSize = gb * 2 ** 30; }
   }
 
+  /** Drop every loaded tileset so tiles reload with the current texture / detail settings. */
+  reload(): void {
+    for (const e of this.entries) { this.deactivate(e); e.failed = false; }
+    this.lastSelect = -1e9; this.idle = false;
+  }
+
+  /** True if (lat, lon) lies inside the prepared coverage (a building tileset's bounds). */
+  covers(lat: number, lon: number): boolean {
+    for (const e of this.entries) { const b = e.def.bounds; if (e.def.type === 'bldg' && lat >= b.south && lat <= b.north && lon >= b.west && lon <= b.east) return true; }
+    return false;
+  }
+
   setErrorTarget(v: number): void {
     this.errorTarget = v;
     for (const e of this.entries) if (e.tiles) e.tiles.errorTarget = v;
@@ -237,8 +306,10 @@ export class TilesManager implements DeckProvider {
       for (const e of this.entries) {
         const dx = Math.max(e.minX - x, 0, x - e.maxX), dz = Math.max(e.minZ - z, 0, z - e.maxZ);
         const d = Math.hypot(dx, dz);
-        if (!e.tiles && !e.failed && d < range) this.activate(e);
-        else if (e.tiles && d > range * 1.5 + 300) this.deactivate(e);
+        // vegetation / street furniture are small-scale detail: only close to the car
+        const r = e.def.type === 'veg' || e.def.type === 'frn' ? Math.min(range, 450) : range;
+        if (!e.tiles && !e.failed && d < r) this.activate(e);
+        else if (e.tiles && d > r * 1.5 + 300) this.deactivate(e);
       }
     }
     // tile selection is CPU work per tileset: 20 Hz is plenty at driving speeds
@@ -256,9 +327,15 @@ export class TilesManager implements DeckProvider {
     c.fov = Math.min(110, g.fov + 14); c.aspect = g.aspect; c.near = g.near; c.far = this.loadDistance;
     c.updateProjectionMatrix();
     c.matrixWorld.copy(g.matrixWorld); c.matrixWorldInverse.copy(g.matrixWorldInverse);
+    const nc = this.nearCamera, H = 420;
+    nc.fov = (2 * Math.atan(this.nearRange / H) * 180) / Math.PI; nc.aspect = 1; nc.near = 10; nc.far = H + 400;
+    nc.updateProjectionMatrix();
+    nc.position.set(x, g.position.y + H, z); nc.up.set(0, 0, -1); nc.lookAt(x, g.position.y, z);
+    nc.updateMatrixWorld(); nc.matrixWorldInverse.copy(nc.matrixWorld).invert();
     for (const e of this.entries) {
       if (!e.tiles) continue;
       try {
+        e.tiles.setResolutionFromRenderer(nc, this.renderer);
         e.tiles.setResolutionFromRenderer(c, this.renderer);
         e.tiles.update();
       } catch (err) {
