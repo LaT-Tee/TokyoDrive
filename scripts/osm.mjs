@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dataDir, loadManifest, saveManifest } from './lib.mjs';
 
-const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass-api.de/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
 const QZ = 12, OZ = 14;
 const CLASSES = ['motorway', 'motorway_link', 'trunk', 'trunk_link', 'primary', 'primary_link', 'secondary', 'secondary_link', 'tertiary', 'tertiary_link', 'unclassified', 'residential', 'living_street'];
 // default carriageway width (m) per class when lanes / width tags are missing
@@ -39,11 +39,11 @@ async function overpass(query) {
   for (let attempt = 0; attempt < 8; attempt++) {
     const url = OVERPASS[attempt % OVERPASS.length];
     try {
-      const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(query), headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'tokyodrive-bake/0.1' } });
+      const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(query), headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'tokyodrive-bake/0.1' }, signal: AbortSignal.timeout(200000) });
       if (r.ok) return await r.json();
       console.warn('  overpass HTTP', r.status, '- retrying');
     } catch (e) { console.warn('  overpass error', e.message); }
-    await sleep(5000 * (attempt + 1));
+    await sleep(3000 * (attempt + 1));
   }
   throw new Error('overpass failed');
 }
@@ -81,6 +81,8 @@ for (const qt of [...qTiles].sort()) {
     if (isBridge) w.b = 1;
     if (isTunnel) w.t = 1;
     if (Number.isFinite(layer) && layer !== 0) w.l = layer;
+    if (tg.oneway === 'yes' || tg.oneway === '1' || tg.highway === 'motorway' || tg.junction === 'roundabout') w.o = 1;
+    if (Number.isFinite(lanes) && lanes > 0) w.ln = lanes;
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     for (const g of el.geometry) {
       w.p.push(+g.lat.toFixed(6), +g.lon.toFixed(6));

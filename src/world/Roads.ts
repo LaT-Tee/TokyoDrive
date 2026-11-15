@@ -5,13 +5,13 @@ import { frame, latToTileY, lonToTileX } from '../geo/geodesy';
 
 export interface Way {
   id: number; cls: number; name: string;
-  bridge: boolean; tunnel: boolean; layer: number; width: number;
+  bridge: boolean; tunnel: boolean; layer: number; width: number; oneway: boolean; lanes: number;
   n: number; xs: Float64Array; zs: Float64Array; keys: string[]; // node coordinate keys for connectivity
   minX: number; maxX: number; minZ: number; maxZ: number;
 }
-interface RawWay { i: number; c: number; n?: string; b?: 1; t?: 1; l?: number; w: number; p: number[] }
+interface RawWay { i: number; c: number; n?: string; b?: 1; t?: 1; l?: number; o?: 1; ln?: number; w: number; p: number[] }
 
-export interface NearestRoad { x: number; z: number; heading: number; bridge: boolean; name: string; dist: number }
+export interface NearestRoad { x: number; z: number; heading: number; bridge: boolean; name: string; dist: number; width: number }
 
 const REF_H = 60; // nominal ellipsoidal ground height used when projecting OSM nodes
 
@@ -77,7 +77,7 @@ export class Roads {
             xs[k] = p.x; zs[k] = p.z; keys.push(rw.p[k * 2] + ',' + rw.p[k * 2 + 1]);
             minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
           }
-          w = { id: rw.i, cls: rw.c, name: rw.n ?? '', bridge: !!rw.b, tunnel: !!rw.t, layer: rw.l ?? (rw.b ? 1 : 0), width: rw.w, n, xs, zs, keys, minX, maxX, minZ, maxZ };
+          w = { id: rw.i, cls: rw.c, name: rw.n ?? '', bridge: !!rw.b, tunnel: !!rw.t, layer: rw.l ?? (rw.b ? 1 : 0), width: rw.w, oneway: !!rw.o || rw.c === 0 || rw.c === 1 || rw.c === 3, lanes: rw.ln ?? 0, n, xs, zs, keys, minX, maxX, minZ, maxZ };
           this.ways.set(rw.i, w);
         }
         this.refs.set(rw.i, (this.refs.get(rw.i) ?? 0) + 1);
@@ -93,17 +93,17 @@ export class Roads {
   }
 
   /** Nearest point on any (non-tunnel) road centreline within maxDist. */
-  nearest(x: number, z: number, maxDist: number): NearestRoad | null {
+  nearest(x: number, z: number, maxDist: number, maxCls = 99): NearestRoad | null {
     let best: NearestRoad | null = null, bd = maxDist;
     for (const w of this.ways.values()) {
-      if (w.tunnel || x < w.minX - bd || x > w.maxX + bd || z < w.minZ - bd || z > w.maxZ + bd) continue;
+      if (w.tunnel || w.cls > maxCls || x < w.minX - bd || x > w.maxX + bd || z < w.minZ - bd || z > w.maxZ + bd) continue;
       for (let k = 0; k < w.n - 1; k++) {
         const ax = w.xs[k], az = w.zs[k], dx = w.xs[k + 1] - ax, dz = w.zs[k + 1] - az;
         const len2 = dx * dx + dz * dz;
         if (len2 < 1e-6) continue;
         const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / len2));
         const px = ax + dx * t, pz = az + dz * t, d = Math.hypot(px - x, pz - z);
-        if (d < bd) { bd = d; best = { x: px, z: pz, heading: Math.atan2(dx, -dz), bridge: w.bridge, name: w.name, dist: d }; }
+        if (d < bd) { bd = d; best = { x: px, z: pz, heading: Math.atan2(dx, -dz), bridge: w.bridge, name: w.name, dist: d, width: w.width }; }
       }
     }
     return best;

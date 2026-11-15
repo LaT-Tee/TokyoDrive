@@ -53,13 +53,17 @@ class RetryFetchPlugin {
   }
 }
 
-/** Downscales oversized tile textures before upload: PLATEAU facade textures are
- *  large but soft, and at full size ~150 tiles fill a 0.8 GB cache. */
+/** Texture budget follows model detail: tiles that are only shown up close (small
+ *  geometric error) keep their textures at high resolution, coarse distant tiles
+ *  are downscaled before upload. All tile textures get mipmaps + anisotropy so
+ *  facades stay crisp at grazing angles. */
 class TextureLimitPlugin {
   name = 'TEXTURE_LIMIT_PLUGIN';
-  constructor(private owner: { maxTextureSize: number }) {}
-  async processTileModel(scene: THREE.Object3D): Promise<void> {
-    const max = this.owner.maxTextureSize;
+  constructor(private owner: { textureNear: number; textureFar: number; anisotropy: number }) {}
+  async processTileModel(scene: THREE.Object3D, tile: any): Promise<void> {
+    const err = tile?.geometricError ?? 0;
+    // leaf tiles (error 0) are only shown close to the camera: they get the big textures
+    const max = err < 1 ? this.owner.textureNear : this.owner.textureFar;
     const seen = new Set<THREE.Texture>();
     scene.traverse((o) => {
       const m = o as THREE.Mesh;
@@ -70,16 +74,19 @@ class TextureLimitPlugin {
       }
     });
     await Promise.all([...seen].map(async (t) => {
+      t.anisotropy = this.owner.anisotropy;
+      t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
       const img = t.image as ImageBitmap | HTMLImageElement | undefined;
       if (!img || !(img as any).width) return;
       const w = (img as any).width as number, h = (img as any).height as number;
       const k = Math.min(1, max / Math.max(w, h));
-      if (k >= 1) return;
+      if (k >= 1) { t.needsUpdate = true; return; }
       try {
-        const small = await createImageBitmap(img as any, { resizeWidth: Math.max(1, Math.round(w * k)), resizeHeight: Math.max(1, Math.round(h * k)), resizeQuality: 'medium' });
+        const small = await createImageBitmap(img as any, { resizeWidth: Math.max(1, Math.round(w * k)), resizeHeight: Math.max(1, Math.round(h * k)), resizeQuality: 'high' });
         (img as any).close?.();
-        t.image = small; t.needsUpdate = true;
+        t.image = small;
       } catch { /* keep the original */ }
+      t.needsUpdate = true;
     }));
   }
 }
@@ -100,14 +107,18 @@ export class TilesManager implements DeckProvider {
   private raycaster = new THREE.Raycaster();
   private down = new THREE.Vector3(0, -1, 0);
   private lastSelect = -1e9;
-  errorTarget = 18;
-  maxTextureSize = 512;
+  errorTarget = 40;
+  private cacheGB = 1.6;
+  textureNear = 2048; textureFar = 512; anisotropy = 8;
+  /** Bumped whenever a tile model appears or disappears (shadow map refresh trigger). */
+  version = 0;
+  private lastCam = new Float64Array(16);
   /** Buildings are loaded / displayed only within this distance of the camera. */
   loadDistance = 1200;
   // Tiles are culled against a copy of the game camera with a short far plane, so
   // nothing beyond loadDistance (or outside the view) is ever requested.
   private cullCamera = new THREE.PerspectiveCamera();
-  private lastUpdate = -1e9;
+  private lastUpdate = -1e9; private lastFull = -1e9; private idle = false;
   loadErrors = 0;
   /** Called for every loaded bridge mesh (for deck-coverage tests). */
   onBridgeLoaded: (() => void) | null = null;
@@ -146,7 +157,7 @@ export class TilesManager implements DeckProvider {
       this.lru = tiles.lruCache; this.dq = tiles.downloadQueue; this.pq = tiles.parseQueue;
       // explicit cache caps
       this.lru.minSize = 2500; this.lru.maxSize = 4000;
-      this.lru.minBytesSize = 0.9 * 2 ** 30; this.lru.maxBytesSize = 1.2 * 2 ** 30;
+      this.setCacheLimit(this.cacheGB);
       this.dq.maxJobsPerOrigin = 6; this.pq.maxJobs = 1;
     }
     tiles.registerPlugin(new RetryFetchPlugin() as any);
@@ -163,6 +174,7 @@ export class TilesManager implements DeckProvider {
       scene.traverse((o) => {
         const m = o as THREE.Mesh;
         if (!m.isMesh) return;
+        m.castShadow = true; m.receiveShadow = true;
         // PLATEAU materials ship with roughness 0 (mirror-like); make them matte
         for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
           const s = mat as THREE.MeshStandardMaterial;
@@ -182,7 +194,9 @@ export class TilesManager implements DeckProvider {
         }
       });
       if (isBridge) this.onBridgeLoaded?.();
+      this.version++;
     });
+    tiles.addEventListener('tile-visibility-change', () => { this.version++; });
     tiles.addEventListener('dispose-model', (ev: any) => {
       (ev.scene as THREE.Object3D).traverse((o) => {
         const m = o as THREE.Mesh;
@@ -203,6 +217,11 @@ export class TilesManager implements DeckProvider {
     this.root.remove(e.tiles.group);
     try { e.tiles.dispose(); } catch (err) { console.warn('[tiles] dispose failed', err); }
     e.tiles = null;
+  }
+
+  setCacheLimit(gb: number): void {
+    this.cacheGB = gb;
+    if (this.lru) { this.lru.minBytesSize = gb * 0.8 * 2 ** 30; this.lru.maxBytesSize = gb * 2 ** 30; }
   }
 
   setErrorTarget(v: number): void {
@@ -226,7 +245,15 @@ export class TilesManager implements DeckProvider {
     if (now - this.lastUpdate < 50) return;
     this.lastUpdate = now;
     const c = this.cullCamera, g = this.camera;
-    c.fov = g.fov; c.aspect = g.aspect; c.near = g.near; c.far = this.loadDistance;
+    // nothing to do while the camera is still and every requested tile has arrived
+    const el = g.matrixWorld.elements;
+    let moved = false;
+    for (let i = 0; i < 16; i++) if (Math.abs(el[i] - this.lastCam[i]) > 1e-4) { moved = true; break; }
+    if (!moved && this.idle && now - this.lastFull < 2000) return;
+    this.lastFull = now;
+    this.lastCam.set(el);
+    // slightly wider than the view so buildings just outside it are ready when the car turns
+    c.fov = Math.min(110, g.fov + 14); c.aspect = g.aspect; c.near = g.near; c.far = this.loadDistance;
     c.updateProjectionMatrix();
     c.matrixWorld.copy(g.matrixWorld); c.matrixWorldInverse.copy(g.matrixWorldInverse);
     for (const e of this.entries) {
@@ -240,6 +267,7 @@ export class TilesManager implements DeckProvider {
         e.failed = true; this.deactivate(e);
       }
     }
+    this.idle = this.pending === 0;
   }
 
   /** Tiles still downloading / parsing across all active tilesets. */

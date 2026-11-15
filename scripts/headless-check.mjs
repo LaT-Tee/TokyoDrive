@@ -5,6 +5,7 @@
 //   node scripts/headless-check.mjs phase1            scripted drive + wall stop
 //   node scripts/headless-check.mjs spawns            360° ground check at every spawn
 //   node scripts/headless-check.mjs tour              drive in every ward / city core
+//   node scripts/headless-check.mjs roads             road layer: sharp markings, no flicker (Shinjuku, Fuchu)
 //   node scripts/headless-check.mjs jitter            float-precision check at Tachikawa
 //
 // Needs the dev server running (BASE_URL, default http://localhost:5173).
@@ -229,6 +230,66 @@ if (mode === 'tour') {
     const s = await state();
     const good = s.terrainReady && d.metres >= 100 && !s.airborne && Math.abs(s.y - s.surface) < 0.3 && s.loadErrors === before.loadErrors;
     check('tour-' + p.id, good, { name: p.name, metres: +d.metres.toFixed(0), pendingAfter5s: after5.tilesPending + after5.terrainPending, terrainReadyAfter5s: after5.terrainReady, settleMs: st.waitedMs + (Date.now() - t0 - st.waitedMs > 0 ? 5000 : 0), fps: +s.fps.toFixed(0), shot: await shot('tour-' + p.id) });
+  }
+}
+
+if (mode === 'roads') {
+  // Acceptance for the vector road layer: driver's-view shot at Shinjuku and Fuchu,
+  // continuous imagery on the road, markings sharp 10-30 m ahead, and a 30 s
+  // static frame-difference test (two layers too close together would shimmer).
+  for (const id of ['shinjuku', 'fuchu']) {
+    await open('spawn=' + id);
+    await settle(30000);
+    await sleep(4500);
+    await page.evaluate(() => { const t = window.__td; t.toRoad(7); t.setCam(2); });
+    await page.waitForFunction(() => window.__td.roadSurface.builtCells >= 9, null, { timeout: 60000 });
+    const st = await settle(40000);
+    await sleep(3000);
+    const file = await shot(`roads-${id}-driver`);
+    const res = await page.evaluate(async (secs) => {
+      const t = window.__td, c = t.car, cam = t.camera;
+      // image rows that show the road 10 m and 30 m ahead
+      const row = (d) => {
+        const x = c.x + Math.sin(c.heading) * d, z = c.z - Math.cos(c.heading) * d;
+        const y = t.ground.surface(x, z, c.y) + 0.1;
+        const e = cam.matrixWorldInverse.elements, p = cam.projectionMatrix.elements;
+        const vx = e[0] * x + e[4] * y + e[8] * z + e[12], vy = e[1] * x + e[5] * y + e[9] * z + e[13], vz = e[2] * x + e[6] * y + e[10] * z + e[14];
+        const cy = p[5] * vy + p[9] * vz, cw = -vz;
+        return { ndcY: cy / cw, ndcX: (p[0] * vx + p[8] * vz) / cw };
+      };
+      const first = await t.grab();
+      const { w, h } = first;
+      const lum = (px, i) => 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+      const yOf = (ndc) => Math.round(((ndc + 1) / 2) * (h - 1)); // readPixels rows are bottom-up
+      const y10 = yOf(row(10).ndcY), y30 = yOf(row(30).ndcY);
+      // sharpness: strongest luminance step between neighbouring pixels on each row of the 10-30 m band
+      let sharpRows = 0, rows = 0, maxStep = 0;
+      for (let y = Math.min(y10, y30); y <= Math.max(y10, y30); y++) {
+        let best = 0;
+        for (let x = Math.round(w * 0.2); x < Math.round(w * 0.8); x++) best = Math.max(best, Math.abs(lum(first.px, (y * w + x) * 4) - lum(first.px, (y * w + x + 1) * 4)));
+        rows++; if (best >= 45) sharpRows++; maxStep = Math.max(maxStep, best);
+      }
+      // continuous imagery: road band below the 30 m row has no void (black) pixels
+      let dark = 0, total = 0;
+      for (let y = 0; y <= Math.max(y10, y30); y++) for (let x = 0; x < w; x += 2) { total++; if (lum(first.px, (y * w + x) * 4) < 4) dark++; }
+      // flicker: compare one frame per second against the first, on the ground part of the image
+      let worst = 0, frames = 0;
+      const t0 = performance.now();
+      while (performance.now() - t0 < secs * 1000) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const f = await t.grab(); frames++;
+        let diff = 0, n = 0;
+        for (let y = 0; y <= Math.max(y10, y30) + 20; y++) for (let x = 0; x < w; x++) {
+          const i = (y * w + x) * 4; n++;
+          if (Math.abs(f.px[i] - first.px[i]) > 10 || Math.abs(f.px[i + 1] - first.px[i + 1]) > 10 || Math.abs(f.px[i + 2] - first.px[i + 2]) > 10) diff++;
+        }
+        worst = Math.max(worst, diff / n);
+      }
+      return { w, h, band: [y10, y30], sharpRowFraction: sharpRows / rows, maxStep: Math.round(maxStep), voidFraction: dark / total, flickerWorstFraction: worst, frames, road: t.roads.nameAt(c.x, c.z), cells: t.roadSurface.builtCells };
+    }, Number(process.env.SECONDS ?? 30));
+    check(`roads-${id}-continuous`, res.voidFraction === 0, { voidFraction: res.voidFraction, shot: file, road: res.road });
+    check(`roads-${id}-markings-sharp-10-30m`, res.sharpRowFraction >= 0.6 && res.maxStep >= 80, { sharpRowFraction: +res.sharpRowFraction.toFixed(2), maxStep: res.maxStep, rows: res.band });
+    check(`roads-${id}-no-flicker-30s`, res.flickerWorstFraction < 0.002, { worstChangedFraction: +res.flickerWorstFraction.toFixed(5), frames: res.frames, settle: st });
   }
 }
 

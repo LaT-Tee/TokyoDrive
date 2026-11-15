@@ -1,0 +1,121 @@
+{
+ "mode": "spawns",
+ "base": "http://localhost:5173",
+ "quality": "balanced",
+ "date": "2026-11-15T13:46:39.376Z",
+ "results": {
+  "spawn-shinjuku": {
+   "pass": true,
+   "settle": {
+    "waitedMs": 1781,
+    "pending": 0,
+    "terrainReady": true
+   },
+   "holes": 0,
+   "y": 79,
+   "lat": 35.68917,
+   "lon": 139.70072,
+   "shots": [
+    "spawn-shinjuku-0.jpg",
+    "spawn-shinjuku-90.jpg",
+    "spawn-shinjuku-180.jpg",
+    "spawn-shinjuku-270.jpg"
+   ]
+  },
+  "spawn-tokyo": {
+   "pass": true,
+   "settle": {
+    "waitedMs": 18252,
+    "pending": 0,
+    "terrainReady": true
+   },
+   "holes": 0,
+   "y": 36.9,
+   "lat": 35.68263,
+   "lon": 139.76621,
+   "shots": [
+    "spawn-tokyo-0.jpg",
+    "spawn-tokyo-90.jpg",
+    "spawn-tokyo-180.jpg",
+    "spawn-tokyo-270.jpg"
+   ]
+  },
+  "spawn-fuchu": {
+   "pass": true,
+   "settle": {
+    "waitedMs": 3822,
+    "pending": 0,
+    "terrainReady": true
+   },
+   "holes": 0,
+   "y": 60.5,
+   "lat": 35.66875,
+   "lon": 139.47772,
+   "shots": [
+    "spawn-fuchu-0.jpg",
+    "spawn-fuchu-90.jpg",
+    "spawn-fuchu-180.jpg",
+    "spawn-fuchu-270.jpg"
+   ]
+  },
+  "spawn-tachikawa": {
+   "pass": true,
+   "settle": {
+    "waitedMs": 8341,
+    "pending": 0,
+    "terrainReady": true
+   },
+   "holes": 0,
+   "y": 68.8,
+   "lat": 35.69699,
+   "lon": 139.41387,
+   "shots": [
+    "spawn-tachikawa-0.jpg",
+    "spawn-tachikawa-90.jpg",
+    "spawn-tachikawa-180.jpg",
+    "spawn-tachikawa-270.jpg"
+   ]
+  },
+  "spawn-minatomirai": {
+   "pass": true,
+   "settle": {
+    "waitedMs": 11508,
+    "pending": 0,
+    "terrainReady": true
+   },
+   "holes": 0,
+   "y": -15.9,
+   "lat": 35.45464,
+   "lon": 139.63248,
+   "shots": [
+    "spawn-minatomirai-0.jpg",
+    "spawn-minatomirai-90.jpg",
+    "spawn-minatomirai-180.jpg",
+    "spawn-minatomirai-270.jpg"
+   ]
+  },
+  "spawn-rainbow": {
+   "pass": true,
+   "settle": {
+    "waitedMs": 16002,
+    "pending": 0,
+    "terrainReady": true
+   },
+   "holes": 0,
+   "y": 31.2,
+   "lat": 35.63654,
+   "lon": 139.76353,
+   "shots": [
+    "spawn-rainbow-0.jpg",
+    "spawn-rainbow-90.jpg",
+    "spawn-rainbow-180.jpg",
+    "spawn-rainbow-270.jpg"
+   ]
+  },
+  "no-console-errors": {
+   "pass": true,
+   "errors": []
+  }
+ },
+ "pass": true
+}

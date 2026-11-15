@@ -10,15 +10,16 @@ export interface CarSpec {
   topSpeed: number; // km/h limiter
   accel: number; brake: number; // m/s^2
   eyeHeight: number; // hood camera height
+  grip: number;      // tyre grip multiplier
 }
 
 export const CARS: CarSpec[] = [
-  { id: 'sedan', name: 'セダン', file: 'sedan.glb', length: 4.45, width: 1.75, wheelbase: 2.6, wheelRadius: 0.33, topSpeed: 120, accel: 4.2, brake: 11, eyeHeight: 1.15 },
-  { id: 'sedan-sports', name: 'スポーツセダン', file: 'sedan-sports.glb', length: 4.45, width: 1.75, wheelbase: 2.6, wheelRadius: 0.33, topSpeed: 160, accel: 6.0, brake: 13, eyeHeight: 1.05 },
-  { id: 'hatchback-sports', name: 'ホットハッチ', file: 'hatchback-sports.glb', length: 4.1, width: 1.72, wheelbase: 2.5, wheelRadius: 0.33, topSpeed: 140, accel: 5.2, brake: 12, eyeHeight: 1.1 },
-  { id: 'suv', name: 'SUV', file: 'suv.glb', length: 4.6, width: 1.85, wheelbase: 2.7, wheelRadius: 0.36, topSpeed: 120, accel: 3.8, brake: 10, eyeHeight: 1.4 },
-  { id: 'van', name: 'バン', file: 'van.glb', length: 4.7, width: 1.85, wheelbase: 2.8, wheelRadius: 0.35, topSpeed: 110, accel: 3.2, brake: 9.5, eyeHeight: 1.5 },
-  { id: 'taxi', name: 'タクシー', file: 'taxi.glb', length: 4.45, width: 1.75, wheelbase: 2.6, wheelRadius: 0.33, topSpeed: 120, accel: 4.0, brake: 11, eyeHeight: 1.15 },
+  { id: 'sedan', name: 'セダン', file: 'sedan.glb', length: 4.45, width: 1.75, wheelbase: 2.6, wheelRadius: 0.33, topSpeed: 120, accel: 4.2, brake: 11, eyeHeight: 1.15, grip: 1.0 },
+  { id: 'sedan-sports', name: 'スポーツセダン', file: 'sedan-sports.glb', length: 4.45, width: 1.75, wheelbase: 2.6, wheelRadius: 0.33, topSpeed: 160, accel: 6.0, brake: 13, eyeHeight: 1.05, grip: 1.1 },
+  { id: 'hatchback-sports', name: 'ホットハッチ', file: 'hatchback-sports.glb', length: 4.1, width: 1.72, wheelbase: 2.5, wheelRadius: 0.33, topSpeed: 140, accel: 5.2, brake: 12, eyeHeight: 1.1, grip: 1.06 },
+  { id: 'suv', name: 'SUV', file: 'suv.glb', length: 4.6, width: 1.85, wheelbase: 2.7, wheelRadius: 0.36, topSpeed: 120, accel: 3.8, brake: 10, eyeHeight: 1.4, grip: 0.93 },
+  { id: 'van', name: 'バン', file: 'van.glb', length: 4.7, width: 1.85, wheelbase: 2.8, wheelRadius: 0.35, topSpeed: 110, accel: 3.2, brake: 9.5, eyeHeight: 1.5, grip: 0.88 },
+  { id: 'taxi', name: 'タクシー', file: 'taxi.glb', length: 4.45, width: 1.75, wheelbase: 2.6, wheelRadius: 0.33, topSpeed: 120, accel: 4.0, brake: 11, eyeHeight: 1.15, grip: 0.98 },
 ];
 
 export const BODY_COLORS = ['#d7263d', '#f2f2f2', '#16161a', '#1f6feb', '#f5b700', '#1b998b', '#8d99ae', '#ff7f11'];

@@ -2,48 +2,48 @@
  "mode": "phase1",
  "base": "http://localhost:5173",
  "quality": "balanced",
- "date": "2026-11-15T13:17:06.303Z",
+ "date": "2026-11-15T13:45:28.651Z",
  "results": {
   "start": {
-   "x": 6.251334396009495,
-   "y": 73.62154456924347,
-   "z": 35.45307910843949,
+   "x": 10.738462168367562,
+   "y": 78.98574430030692,
+   "z": 47.438607416757286,
    "speed": 0,
-   "heading": 0,
+   "heading": 1.348182601062286,
    "odometer": 0,
    "blocked": false,
    "airborne": false,
-   "surface": 73.62108166237479,
+   "surface": 78.98574430030692,
    "terrainReady": true,
-   "obstacle": 74.4,
+   "obstacle": null,
    "pending": 0,
    "tilesPending": 0,
    "terrainPending": 0,
-   "fps": 60.00393468424168,
-   "lat": 35.689280472005926,
-   "lon": 139.70066906247334,
-   "samples": 4512,
+   "fps": 60.00393468424146,
+   "lat": 35.68917245035045,
+   "lon": 139.70071863437263,
+   "samples": 3815,
    "fallbackSamples": 0,
-   "sampleMs": 43.19999951124191,
-   "minClearance": -0.0002707632207403776,
+   "sampleMs": 51.69999945163727,
+   "minClearance": 0,
    "maxClearance": 0,
    "loadErrors": 0
   },
   "drive>=500m": {
    "pass": true,
-   "metres": 551,
-   "seconds": 47.7
+   "metres": 550.3,
+   "seconds": 41.4
   },
   "stays-on-ground": {
    "pass": true,
    "minClearance": -0.02,
-   "maxClearance": 0.14
+   "maxClearance": 0.145
   },
   "ground-samples": {
    "pass": true,
-   "samples": 85479,
+   "samples": 85684,
    "fallback": 0,
-   "msPerFrame": 0.0888
+   "msPerFrame": 0.0911
   },
   "stops-at-wall": {
    "pass": true,
@@ -51,7 +51,7 @@
    "moved": true,
    "blocked": true,
    "speed": 0,
-   "gapToWall": 8.44,
+   "gapToWall": 5.76,
    "insideBuilding": false,
    "approach": 16
   },

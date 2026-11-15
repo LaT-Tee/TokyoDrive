@@ -1,0 +1,63 @@
+{
+ "mode": "roads",
+ "base": "http://localhost:5173",
+ "quality": "balanced",
+ "date": "2026-11-15T13:51:11.499Z",
+ "results": {
+  "roads-shinjuku-continuous": {
+   "pass": true,
+   "voidFraction": 0,
+   "shot": "roads-shinjuku-driver.jpg",
+   "road": "甲州街道"
+  },
+  "roads-shinjuku-markings-sharp-10-30m": {
+   "pass": true,
+   "sharpRowFraction": 1,
+   "maxStep": 182,
+   "rows": [
+    307,
+    350
+   ]
+  },
+  "roads-shinjuku-no-flicker-30s": {
+   "pass": true,
+   "worstChangedFraction": 0,
+   "frames": 30,
+   "settle": {
+    "waitedMs": 2,
+    "pending": 0,
+    "terrainReady": true
+   }
+  },
+  "roads-fuchu-continuous": {
+   "pass": true,
+   "voidFraction": 0,
+   "shot": "roads-fuchu-driver.jpg",
+   "road": "府中街道"
+  },
+  "roads-fuchu-markings-sharp-10-30m": {
+   "pass": true,
+   "sharpRowFraction": 1,
+   "maxStep": 129,
+   "rows": [
+    306,
+    347
+   ]
+  },
+  "roads-fuchu-no-flicker-30s": {
+   "pass": true,
+   "worstChangedFraction": 0,
+   "frames": 30,
+   "settle": {
+    "waitedMs": 0,
+    "pending": 0,
+    "terrainReady": true
+   }
+  },
+  "no-console-errors": {
+   "pass": true,
+   "errors": []
+  }
+ },
+ "pass": true
+}

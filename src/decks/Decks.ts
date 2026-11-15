@@ -21,7 +21,11 @@ export class Decks implements DeckProvider {
   readonly group = new THREE.Group();
   private decks = new Map<number, Deck>();
   private roadsVersion = -1;
+  /** Bumped whenever a deck is built, removed or found to be covered by PLATEAU. */
+  version = 0;
   private bridgeDirty = false;
+  /** Heights already handed out to built decks, per OSM node: later batches must join them exactly. */
+  private nodeY = new Map<string, number>();
   private lastBuild = 0;
   private material = new THREE.MeshLambertMaterial({ vertexColors: true });
 
@@ -29,6 +33,9 @@ export class Decks implements DeckProvider {
     this.group.name = 'procedural-decks';
     tiles.onBridgeLoaded = () => { this.bridgeDirty = true; };
   }
+
+  /** Deck heights for a procedurally built bridge way (null if not built or covered by PLATEAU). */
+  profile(id: number): Float64Array | null { const d = this.decks.get(id); return d && d.mesh ? d.ys : null; }
 
   get count(): number { let n = 0; for (const d of this.decks.values()) if (d.mesh) n++; return n; }
   get coveredCount(): number { let n = 0; for (const d of this.decks.values()) if (d.covered) n++; return n; }
@@ -40,7 +47,7 @@ export class Decks implements DeckProvider {
     for (const [id, d] of this.decks) {
       const w = d.way;
       if (x < w.minX - DROP_RANGE || x > w.maxX + DROP_RANGE || z < w.minZ - DROP_RANGE || z > w.maxZ + DROP_RANGE || !this.roads.ways.has(id)) {
-        this.disposeMesh(d); this.decks.delete(id);
+        this.disposeMesh(d); this.decks.delete(id); this.version++;
       }
     }
     if (now - this.lastBuild < 500) return;
@@ -50,7 +57,7 @@ export class Decks implements DeckProvider {
       this.bridgeDirty = false;
       for (const d of this.decks.values()) {
         if (d.covered) continue;
-        if (this.isCovered(d)) { d.covered = true; this.disposeMesh(d); }
+        if (this.isCovered(d)) { d.covered = true; this.disposeMesh(d); this.version++; }
       }
     }
     if (this.roadsVersion === this.roads.version && this.pendingNone) return;
@@ -72,6 +79,7 @@ export class Decks implements DeckProvider {
       const d: Deck = { way: w, ys: heights.get(w.id)!, mesh: null, covered: false, checkedAt: now };
       this.decks.set(w.id, d);
       if (this.isCovered(d)) d.covered = true; else this.buildMesh(d);
+      this.version++;
       if (performance.now() - t0 > 12) { this.pendingNone = false; this.roadsVersion = -1; break; } // continue next tick
     }
   }
@@ -120,7 +128,9 @@ export class Decks implements DeckProvider {
       const key = w.keys[k];
       if (!this.terrain.isReady(w.xs[k], w.zs[k])) continue;
       const g = ground(w, k);
-      if (anchors.has(key)) { upper.set(key, g); lower.set(key, g); desired.set(key, g); }
+      const fixed = this.nodeY.get(key);
+      if (fixed !== undefined) { upper.set(key, fixed); lower.set(key, fixed); desired.set(key, fixed); }
+      else if (anchors.has(key)) { upper.set(key, g); lower.set(key, g); desired.set(key, g); }
       else {
         const want = g + Math.max(1, w.layer) * LAYER_HEIGHT;
         desired.set(key, Math.max(desired.get(key) ?? -Infinity, want));
@@ -148,7 +158,9 @@ export class Decks implements DeckProvider {
         ys[k] = Math.max(Math.min(want, upper.get(key) ?? Infinity), lower.get(key) ?? -Infinity);
       }
       // light smoothing of interior nodes so the deck does not mirror terrain bumps
-      for (let it = 0; it < 3; it++) for (let k = 1; k < w.n - 1; k++) if (!anchors.has(w.keys[k])) ys[k] = (ys[k - 1] + 2 * ys[k] + ys[k + 1]) / 4;
+      for (let it = 0; it < 3; it++) for (let k = 1; k < w.n - 1; k++) if (!anchors.has(w.keys[k]) && !this.nodeY.has(w.keys[k])) ys[k] = (ys[k - 1] + 2 * ys[k] + ys[k + 1]) / 4;
+      if (this.nodeY.size > 200000) this.nodeY.clear();
+      for (let k = 0; k < w.n; k++) this.nodeY.set(w.keys[k], ys[k]);
       out.set(w.id, ys);
     }
     return out;
@@ -177,12 +189,12 @@ export class Decks implements DeckProvider {
     let run = 0;
     for (let k = 0; k < w.n - 1; k++) {
       const l0 = L[k], l1 = L[k + 1], r0 = R[k], r1 = R[k + 1];
-      quad(l0, r0, r1, l1, 0.20, 0.21, 0.23);                              // asphalt top
-      quad(dn(l0, THICK), dn(l1, THICK), dn(r1, THICK), dn(r0, THICK), 0.42, 0.42, 0.42); // underside
-      quad(up(l0, RAIL_H), dn(l0, THICK), dn(l1, THICK), up(l1, RAIL_H), 0.62, 0.62, 0.60); // left side + rail (outer)
-      quad(up(l0, RAIL_H), up(l1, RAIL_H), l1, l0, 0.70, 0.70, 0.68);      // left rail (inner)
-      quad(up(r0, RAIL_H), up(r1, RAIL_H), dn(r1, THICK), dn(r0, THICK), 0.62, 0.62, 0.60);
-      quad(up(r0, RAIL_H), r0, r1, up(r1, RAIL_H), 0.70, 0.70, 0.68);
+      quad(l0, r0, r1, l1, 0.075, 0.078, 0.085);                              // asphalt top
+      quad(dn(l0, THICK), dn(l1, THICK), dn(r1, THICK), dn(r0, THICK), 0.2, 0.2, 0.2); // underside
+      quad(up(l0, RAIL_H), dn(l0, THICK), dn(l1, THICK), up(l1, RAIL_H), 0.33, 0.33, 0.32); // left side + rail (outer)
+      quad(up(l0, RAIL_H), up(l1, RAIL_H), l1, l0, 0.4, 0.4, 0.39);      // left rail (inner)
+      quad(up(r0, RAIL_H), up(r1, RAIL_H), dn(r1, THICK), dn(r0, THICK), 0.33, 0.33, 0.32);
+      quad(up(r0, RAIL_H), r0, r1, up(r1, RAIL_H), 0.4, 0.4, 0.39);
       // pillars
       const sx = w.xs[k], sz = w.zs[k], ex = w.xs[k + 1], ez = w.zs[k + 1];
       const len = Math.hypot(ex - sx, ez - sz);
@@ -195,7 +207,7 @@ export class Decks implements DeckProvider {
           const c = [[x - s, z - s], [x + s, z - s], [x + s, z + s], [x - s, z + s]];
           for (let i = 0; i < 4; i++) {
             const a = c[i], b = c[(i + 1) % 4];
-            quad([a[0], top, a[1]], [a[0], g, a[1]], [b[0], g, b[1]], [b[0], top, b[1]], 0.55, 0.55, 0.54);
+            quad([a[0], top, a[1]], [a[0], g, a[1]], [b[0], g, b[1]], [b[0], top, b[1]], 0.3, 0.3, 0.29);
           }
         }
         at += PILLAR_EVERY;
@@ -209,7 +221,7 @@ export class Decks implements DeckProvider {
     const mesh = new THREE.Mesh(geo, this.material);
     mesh.material.side = THREE.DoubleSide;
     mesh.position.set(ox, 0, oz); mesh.matrixAutoUpdate = false; mesh.updateMatrix();
-    mesh.name = 'deck ' + w.id;
+    mesh.name = 'deck ' + w.id; mesh.castShadow = true; mesh.receiveShadow = true;
     d.mesh = mesh; this.group.add(mesh);
   }
 

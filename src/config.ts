@@ -19,17 +19,23 @@ export const DATA_BASE: string =
 
 export type Quality = 'performance' | 'balanced' | 'ultra';
 export interface QualityPreset {
-  errorTarget: number;    // 3D Tiles screen-space error (px); higher = coarser, fewer downloads
+  // 3D Tiles screen-space error (px). PLATEAU tiles carry large geometric errors, so this
+  // decides how close you must be before the most detailed (leaf) tiles replace coarse ones.
+  errorTarget: number;
   loadDistance: number;   // buildings are only loaded / shown within this distance of the camera (m)
   terrainRadius: number;  // detailed ground chunks (≈1 km each) around the car
-  pixelRatio: number;
-  textureSize: number;    // max building texture edge (px)
+  pixelRatio: number;     // upper bound; dynamic resolution may go below it to hold the frame rate
+  textureNear: number;    // max building texture edge for detailed (near) tiles (px)
+  textureFar: number;     // max building texture edge for coarse (distant) tiles (px)
   aerial: boolean;        // atmospheric haze post effect
+  shadowSize: number;     // sun shadow map resolution (0 = off)
+  shadowRange: number;    // half-width of the shadowed area around the car (m)
+  cacheGB: number;        // tile cache byte cap
 }
 export const QUALITY: Record<Quality, QualityPreset> = {
-  performance: { errorTarget: 30, loadDistance: 700, terrainRadius: 1, pixelRatio: 0.75, textureSize: 256, aerial: false },
-  balanced: { errorTarget: 18, loadDistance: 1200, terrainRadius: 2, pixelRatio: 1, textureSize: 512, aerial: true },
-  ultra: { errorTarget: 9, loadDistance: 2500, terrainRadius: 3, pixelRatio: 1.5, textureSize: 1024, aerial: true },
+  performance: { errorTarget: 64, loadDistance: 900, terrainRadius: 1, pixelRatio: 0.75, textureNear: 1024, textureFar: 256, aerial: false, shadowSize: 0, shadowRange: 0, cacheGB: 0.8 },
+  balanced: { errorTarget: 40, loadDistance: 1600, terrainRadius: 2, pixelRatio: 1, textureNear: 2048, textureFar: 512, aerial: true, shadowSize: 2048, shadowRange: 170, cacheGB: 1.6 },
+  ultra: { errorTarget: 24, loadDistance: 3000, terrainRadius: 3, pixelRatio: 1.5, textureNear: 4096, textureFar: 1024, aerial: true, shadowSize: 4096, shadowRange: 240, cacheGB: 2.6 },
 };
 
 export const CAMERA_NEAR = 0.5;

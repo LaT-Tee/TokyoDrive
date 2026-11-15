@@ -6,6 +6,7 @@ import { HeightGrid } from './world/HeightGrid';
 import { Ground } from './world/Ground';
 import { Roads } from './world/Roads';
 import { Decks } from './decks/Decks';
+import { ROAD_LIFT, RoadSurface } from './roads/RoadSurface';
 import { TilesManager, type Manifest } from './tiles/TilesManager';
 import { CarController, type CarInput } from './car/CarController';
 import { BODY_COLORS, CARS, CarVisual } from './car/garage';
@@ -54,17 +55,22 @@ async function boot(): Promise<void> {
   const roads = new Roads(manifest.osm ? { zoom: manifest.osm.zoom, tiles: new Set(manifest.osm.tiles), base: `${dataBase}/osm` } : null);
   const decks = new Decks(roads, terrain, tiles);
   scene.add(decks.group);
+  const roadSurface = new RoadSurface(roads, terrain, decks);
+  scene.add(roadSurface.group);
   ground.decks.push(tiles, decks);
   const sky = new Sky(renderer, scene, camera);
   void terrain.buildSafetyGround(manifest.bounds, t.safetyDem.map(abs), t.safetyPhoto.map(abs));
 
+  let resScale = 1; // dynamic resolution: lowered while the frame rate is under target
   const applyQuality = (q: Quality) => {
     quality = q;
     tiles.setErrorTarget(QUALITY[q].errorTarget);
     tiles.loadDistance = QUALITY[q].loadDistance;
-    tiles.maxTextureSize = QUALITY[q].textureSize;
+    tiles.textureNear = QUALITY[q].textureNear; tiles.textureFar = QUALITY[q].textureFar;
+    tiles.setCacheLimit(QUALITY[q].cacheGB);
+    sky.setShadows(QUALITY[q].shadowSize, QUALITY[q].shadowRange);
+    resScale = 1;
     sky.setAerial(QUALITY[q].aerial);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, QUALITY[q].pixelRatio));
     onResize();
   };
 
@@ -89,18 +95,20 @@ async function boot(): Promise<void> {
 
   const teleport = (lat: number, lon: number, headingDeg: number) => {
     const p = frame.llaToLocal(lat, lon, 0);
-    car.x = p.x; car.z = p.z; car.heading = (headingDeg * Math.PI) / 180; car.speed = 0;
+    car.x = p.x; car.z = p.z; car.heading = (headingDeg * Math.PI) / 180; car.course = car.heading; car.speed = 0;
     car.y = terrain.heightAt(p.x, p.z);
     camHeading = car.heading;
     settled = false;
   };
 
   /** Recover (R): nearest road centreline point, else nearest free ground. */
-  const recover = () => {
-    const r = roads.nearest(car.x, car.z, 400);
+  const recover = (maxCls = 99) => {
+    const r = roads.nearest(car.x, car.z, 400, maxCls);
     if (r) {
-      const y = ground.surface(r.x, r.z, r.bridge ? 1e4 : terrain.heightAt(r.x, r.z, car.y) + 1);
-      car.x = r.x; car.z = r.z; car.heading = r.heading; car.speed = 0; car.vy = 0; car.y = y;
+      const g = terrain.heightAt(r.x, r.z, car.y);
+      // on a bridge, land on the deck (procedural or real PLATEAU model), not on the ground below it
+      const y = r.bridge ? Math.max(g, decks.deckHeight(r.x, r.z, 1e9), tiles.castDown(r.x, g + 150, r.z, 151)) : ground.surface(r.x, r.z, g + 1);
+      car.x = r.x; car.z = r.z; car.heading = r.heading; car.course = r.heading; car.speed = 0; car.vy = 0; car.y = y;
       return;
     }
     // no road data nearby: spiral out to the nearest cell without an obstacle
@@ -150,6 +158,7 @@ async function boot(): Promise<void> {
 
   function onResize(): void {
     const w = window.innerWidth, h = window.innerHeight;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, QUALITY[quality].pixelRatio) * resScale);
     renderer.setSize(w, h, false);
     sky.setSize(w, h);
     camera.aspect = w / h; camera.updateProjectionMatrix();
@@ -194,18 +203,31 @@ async function boot(): Promise<void> {
     camera.updateMatrixWorld();
   };
 
+  const grabs: ((f: { w: number; h: number; px: Uint8Array }) => void)[] = [];
   // ---- loop
   const fps = { frames: 0, t: performance.now(), value: 0, worst: 0 };
-  let last = performance.now(), lastTerrain = -1e9, frameNo = 0;
+  let last = performance.now(), lastTerrain = -1e9, frameNo = 0, tilesVersion = -1, slowSeconds = 0;
   const loop = (now: number) => {
     requestAnimationFrame(loop);
     if (document.hidden) { last = now; return; }
     const dt = Math.min(0.05, (now - last) / 1000);
     const rawDt = now - last; last = now; frameNo++;
     fps.frames++; fps.worst = Math.max(fps.worst, rawDt);
-    if (now - fps.t >= 1000) { fps.value = (fps.frames * 1000) / (now - fps.t); fps.frames = 0; fps.t = now; }
+    if (now - fps.t >= 1000) {
+      fps.value = (fps.frames * 1000) / (now - fps.t); fps.frames = 0; fps.t = now;
+      // dynamic resolution: trade pixels for frame rate, restore them when there is headroom
+      const before = resScale;
+      // (loading hitches do not count: only sustained slowness while nothing is pending)
+      slowSeconds = fps.value < 50 && tiles.pending === 0 ? slowSeconds + 1 : 0;
+      if (slowSeconds >= 3 && resScale > 0.55) { resScale = Math.max(0.55, resScale - 0.1); slowSeconds = 1; }
+      else if (fps.value > 57 && resScale < 1) resScale = Math.min(1, resScale + 0.1);
+      if (resScale !== before) onResize();
+      // surface friction: asphalt on a road ribbon, loose ground elsewhere
+      if (roads.enabled && roads.hasData(car.x, car.z)) { const r = roads.nearest(car.x, car.z, 14); car.surfaceGrip = r && r.dist <= r.width / 2 + 1.2 ? 1 : 0.62; } else car.surfaceGrip = 1;
+    }
+    if (tiles.version !== tilesVersion) { tilesVersion = tiles.version; sky.invalidateShadows(); }
 
-    if (now - lastTerrain > 200) { lastTerrain = now; terrain.update(car.x, car.z, QUALITY[quality].terrainRadius, car.y); roads.update(car.x, car.z); decks.update(car.x, car.z); }
+    if (now - lastTerrain > 200) { lastTerrain = now; terrain.update(car.x, car.z, QUALITY[quality].terrainRadius, car.y); roads.update(car.x, car.z); decks.update(car.x, car.z); roadSurface.update(car.x, car.z); }
 
     if (!settled) {
       // wait for the detailed ground under the car before placing it
@@ -222,7 +244,7 @@ async function boot(): Promise<void> {
     }
     ui.setStartEnabled(settled, settled ? 'DRIVE' : 'LOADING…');
 
-    visual.root.position.set(car.x, car.y, car.z);
+    visual.root.position.set(car.x, car.y + ROAD_LIFT, car.z);
     visual.root.rotation.set(car.pitch, -car.heading, -car.roll, 'YXZ');
     visual.animate(car.wheelSpin, car.steer);
     visual.root.visible = !(playing && camMode === 2);
@@ -233,6 +255,7 @@ async function boot(): Promise<void> {
     focus.set(car.x, car.y, car.z);
     sky.update(focus);
     sky.render(dt);
+    if (grabs.length) { const gl = renderer.getContext(); const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight; const px = new Uint8Array(w * h * 4); gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px); for (const g of grabs.splice(0)) g({ w, h, px }); }
 
     if (playing && frameNo % 6 === 0) {
       const pending = tiles.pending + terrain.pendingChunks;
@@ -244,12 +267,18 @@ async function boot(): Promise<void> {
 
   // ---- debug / test hooks (used by scripts/headless-check.mjs)
   (window as any).__td = {
-    car, ground, terrain, tiles, obstacles, roads, decks, sky, camera, renderer, fps, frame,
+    car, ground, terrain, tiles, obstacles, roads, decks, roadSurface, sky, camera, renderer, fps, frame,
     get settled() { return settled; }, get playing() { return playing; },
     teleport, recover,
+    /** Test helper: snap to the nearest road of at least the given class (0 motorway … 12 living street). */
+    toRoad(maxCls: number) { recover(maxCls); camHeading = car.heading; },
+    /** Pixels of the next rendered frame (bottom-up RGBA), for image checks. */
+    grab() { return new Promise<{ w: number; h: number; px: Uint8Array }>((r) => grabs.push(r)); },
+    hideHud(h: boolean) { document.getElementById('ui')!.style.display = h ? 'none' : ''; },
     start() { playing = true; ui.showGarage(false); },
     setCam(i: number) { camMode = i % CAMS.length; },
     setQuality: applyQuality,
+    get resScale() { return resScale; },
     get pending() { return tiles.pending + terrain.pendingChunks + obstacles.pendingJobs; },
     lla() { return frame.localToLla(car.x, car.y, car.z); },
   };

@@ -113,9 +113,12 @@ export class Terrain {
     const g = frame.localToLla(x, refY, z);
     const cx = Math.floor(lonToTileX(g.lon, Z)), cy = Math.floor(latToTileY(g.lat, Z));
     const want: [number, number, number][] = [];
+    const fx = lonToTileX(g.lon, Z), fy = latToTileY(g.lat, Z);
+    const tileM = 40075016.686 * Math.cos((g.lat * Math.PI) / 180) / 2 ** Z; // metres per tile here
     for (let dy = -radius; dy <= radius; dy++) for (let dx = -radius; dx <= radius; dx++) {
-      const d = Math.max(Math.abs(dx), Math.abs(dy));
-      want.push([cx + dx, cy + dy, d]);
+      // distance (m) from the car to this chunk's rectangle
+      const ex = Math.max(cx + dx - fx, 0, fx - (cx + dx + 1)), ey = Math.max(cy + dy - fy, 0, fy - (cy + dy + 1));
+      want.push([cx + dx, cy + dy, Math.hypot(ex, ey) * tileM]);
     }
     want.sort((a, b) => a[2] - b[2]);
     let pending = 0;
@@ -129,7 +132,8 @@ export class Terrain {
         void this.loadChunk(c);
       }
       if (!c.heights) { pending++; continue; }
-      const level = d === 0 ? 17 : d === 1 ? 16 : 15;
+      // photo base: full resolution (z18) within 300 m of the car, coarser further out
+      const level = d < 300 ? 18 : d < 1100 ? 17 : d < 2200 ? 16 : 15;
       // upgrade when closer; downgrade (to free memory) once two levels too detailed
       if ((c.texLevel < level || c.texLevel > level + 1) && !c.texLoading && c.texWant !== level) void this.loadTexture(c, level);
     }
@@ -241,7 +245,7 @@ export class Terrain {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(center.x, 0, center.z);
     mesh.matrixAutoUpdate = false; mesh.updateMatrix();
-    mesh.name = 'terrain ' + c.key;
+    mesh.name = 'terrain ' + c.key; mesh.receiveShadow = true;
     c.heights = heights; c.mesh = mesh;
     this.group.add(mesh);
   }

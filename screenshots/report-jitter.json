@@ -1,0 +1,23 @@
+{
+ "mode": "jitter",
+ "base": "http://localhost:5173",
+ "quality": "balanced",
+ "date": "2026-11-15T13:49:51.661Z",
+ "results": {
+  "no-jitter-at-tachikawa": {
+   "pass": true,
+   "frames": 3601,
+   "rangeX": 0,
+   "rangeY": 0,
+   "rangeZ": 0,
+   "x": -25951.625758854447,
+   "z": -858.0235149263551,
+   "f32step": 0.00390625
+  },
+  "no-console-errors": {
+   "pass": true,
+   "errors": []
+  }
+ },
+ "pass": true
+}
