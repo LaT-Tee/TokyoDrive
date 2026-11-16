@@ -1,6 +1,9 @@
-node_modules
-dist
-data
+/node_modules
+/dist
+/data
 .DS_Store
 ._*
 .nm_trash
+CLAUDE.md
+CLAUDE-*.md
+.claude/

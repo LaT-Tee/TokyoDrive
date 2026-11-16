@@ -24,7 +24,7 @@ function serveData(): Plugin {
       res.setHeader('Content-Length', st.size);
       res.setHeader('Cache-Control', 'public, max-age=3600');
       createReadStream(file).pipe(res);
-    } catch { res.statusCode = 404; res.end('not found'); }
+    } catch { next(); } // not in the local data dir: fall through to public/data
   };
   return {
     name: 'serve-data',

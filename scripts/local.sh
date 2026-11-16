@@ -10,7 +10,7 @@ set -e
 SRC="${0:A:h:h}"
 DST="${TOKYODRIVE_LOCAL:-$HOME/.tokyodrive-deps}"
 mkdir -p "$DST"
-rsync -a --delete --exclude node_modules --exclude data --exclude .git --exclude dist --exclude '._*' --exclude .DS_Store --exclude screenshots "$SRC/" "$DST/"
+rsync -a --delete --exclude /node_modules --exclude /data --exclude /.git --exclude /dist --exclude '._*' --exclude .DS_Store --exclude screenshots "$SRC/" "$DST/"
 export TOKYODRIVE_DATA_DIR="${TOKYODRIVE_DATA_DIR:-$SRC/data}"
 export TOKYODRIVE_SRC="$SRC"
 cd "$DST"
