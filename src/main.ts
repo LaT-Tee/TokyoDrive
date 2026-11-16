@@ -13,7 +13,7 @@ import { TilesManager, type Manifest } from './tiles/TilesManager';
 import { CarController, type CarInput } from './car/CarController';
 import { BODY_COLORS, CARS, VEHICLES, CarVisual, initCarLoaders } from './car/garage';
 import { AircraftController, AircraftVisual, AIR_SPAWN_AGL, type AirInput } from './air/Aircraft';
-import { EngineSound } from './audio/EngineSound';
+import { EngineSound, ENGINE_WORKLET_SRC } from './audio/EngineSound';
 import { Sky } from './sky/Sky';
 import { Ui } from './ui/ui';
 import { MapView } from './ui/MapView';
@@ -394,7 +394,7 @@ async function boot(): Promise<void> {
     airVisual.animate(airc);
     ui.setCockpit(playing && camMode === 2 && !flying(), car.steer);
     if (flying()) sound.update(spec.engine, airc.rpm, airc.load, Math.abs(airc.speed), playing && !map.open && !airc.crashed);
-    else sound.update(spec.engine, car.rpm, car.throttle, Math.abs(car.speed), playing && !map.open);
+    else sound.update(spec.engine, car.rpm, car.throttle, Math.abs(car.speed), playing && !map.open, car.gear);
 
     updateCamera(dt, now);
     tiles.update(car.x, car.z, now);
@@ -418,7 +418,7 @@ async function boot(): Promise<void> {
 
   // ---- debug / test hooks (used by scripts/headless-check.mjs)
   (window as any).__td = {
-    car, airc, sound, get flying() { return flying(); }, get crashes() { return crashes; }, AIR_SPAWN_AGL,
+    car, airc, sound, ENGINE_WORKLET_SRC, get flying() { return flying(); }, get crashes() { return crashes; }, AIR_SPAWN_AGL,
     ground, terrain, tiles, obstacles, roads, decks, tunnels, roadSurface, vegetation, sky, camera, renderer, fps, frame, look, map,
     get settled() { return settled; }, get playing() { return playing; }, get inTunnel() { return inTunnel; },
     teleport, recover,
