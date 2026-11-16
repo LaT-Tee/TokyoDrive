@@ -26,6 +26,7 @@ export class CarController {
   blocked = false;  // wall probe hit this frame
   odometer = 0;     // metres travelled
   wheelSpin = 0;
+  gear = 1; rpm = 900; throttle = 0; // for the engine sound and HUD
   /** Surface friction coefficient under the car (set by the game: asphalt ≈ 1, off-road ≈ 0.6). */
   surfaceGrip = 1;
   slip = 0;         // rad, body slip angle (heading - course)
@@ -57,7 +58,7 @@ export class CarController {
 
     // --- longitudinal: traction- and power-limited drive, friction-limited braking
     let a = 0;
-    const traction = mu * G * 0.62;
+    const traction = mu * G * s.traction;
     if (input.throttle > 0) {
       if (v < -0.3) a += Math.min(s.brake, mu * 10.5) * input.throttle;                 // braking out of reverse
       else a += Math.min(traction, s.accel * Math.min(1, 9 / Math.max(av, 9)) ** 0.55) * input.throttle * Math.max(0, 1 - (v / vmax) ** 2);
@@ -77,6 +78,18 @@ export class CarController {
     if (Math.abs(nv) < 0.03 && input.throttle === 0 && input.brake === 0) nv = 0;
     this.speed = Math.max(-vmax * 0.25, Math.min(vmax * (offRoad ? 0.6 : 1), nv));
     this.aLong = (this.speed - v) / Math.max(dt, 1e-4);
+
+    // --- gearbox: automatic, evenly stepped ratios up to the real top speed; drives the engine sound
+    const e = s.engine, sp0 = Math.abs(this.speed);
+    const gearTop = (g: number) => vmax * 1.03 * (0.2 + 0.8 * ((g - 1) / Math.max(1, e.gears - 1)) ** 1.15);
+    let r = (e.redline * 0.97 * sp0) / gearTop(this.gear);
+    if (r > e.redline * 0.93 && this.gear < e.gears) this.gear++;
+    else if (r < e.redline * 0.42 && this.gear > 1) this.gear--;
+    r = (e.redline * 0.97 * sp0) / gearTop(this.gear);
+    this.throttle = this.speed >= -0.3 ? input.throttle : input.brake;
+    // standing still the engine revs freely against the clutch
+    const free = sp0 < 1.5 ? e.idle + this.throttle * (e.redline - e.idle) * 0.55 : 0;
+    this.rpm += (Math.max(e.idle, r, free) - this.rpm) * Math.min(1, dt * 9);
 
     // --- yaw: bicycle geometry, limited by the lateral grip left in the friction circle
     const L = s.wheelbase;

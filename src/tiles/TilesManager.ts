@@ -228,7 +228,6 @@ export class TilesManager implements DeckProvider {
         // PLATEAU's intermediate tiles are heavily simplified stand-ins (blocky shapes,
         // stretched textures, footprints that spill onto roads). Never show them and never
         // let them into the collision grid: only the real leaf models count.
-        if (coarse) { m.visible = false; return; }
         // PLATEAU materials ship with roughness 0 (mirror-like); make them matte
         for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
           const s = mat as THREE.MeshStandardMaterial;
@@ -238,6 +237,8 @@ export class TilesManager implements DeckProvider {
             else s.color.setRGB(0.34, 0.32, 0.3); // untextured: dim to balance against photo-textured tiles
           }
         }
+        // Hidden at street level; from the air (setCoarseVisible) they are the distant skyline.
+        if (coarse) { this.coarseMeshes.add(m); m.visible = this.coarseVisible; return; }
         // world matrix in the local frame (scene.matrix is the tile's ECEF transform)
         world.identity();
         let n: THREE.Object3D | null = m;
@@ -257,6 +258,7 @@ export class TilesManager implements DeckProvider {
     tiles.addEventListener('dispose-model', (ev: any) => {
       (ev.scene as THREE.Object3D).traverse((o) => {
         const m = o as THREE.Mesh;
+        if (m.isMesh) this.coarseMeshes.delete(m);
         if (m.isMesh && this.deckMeshes.delete(m)) (m.geometry as any).disposeBoundsTree?.();
       });
     });
@@ -279,6 +281,16 @@ export class TilesManager implements DeckProvider {
   setCacheLimit(gb: number): void {
     this.cacheGB = gb;
     if (this.lru) { this.lru.minBytesSize = gb * 0.8 * 2 ** 30; this.lru.maxBytesSize = gb * 2 ** 30; }
+  }
+
+  private coarseMeshes = new Set<THREE.Mesh>();
+  private coarseVisible = false;
+  /** Show PLATEAU's simplified intermediate tiles (only sensible well above the rooftops). */
+  setCoarseVisible(v: boolean): void {
+    if (v === this.coarseVisible) return;
+    this.coarseVisible = v;
+    for (const m of this.coarseMeshes) m.visible = v;
+    this.version++;
   }
 
   /** Drop every loaded tileset so tiles reload with the current texture / detail settings. */

@@ -1,6 +1,6 @@
 // Garage / start screen and HUD (plain DOM, no framework).
 import { SPAWNS, type Quality, type SpawnPoint } from '../config';
-import { BODY_COLORS, CARS, type CarSpec } from '../car/garage';
+import { BODY_COLORS, VEHICLES, type CarSpec } from '../car/garage';
 
 export interface UiCallbacks {
   onCar(spec: CarSpec): void;
@@ -58,7 +58,7 @@ export class Ui {
       box.append(grid); g.append(box);
     };
 
-    group('车辆', CARS, (c) => [c.name, `${c.topSpeed} km/h`], (c) => c.id, initial.car, cb.onCar);
+    group('载具', VEHICLES, (c) => [c.name, c.note], (c) => c.id, initial.car, cb.onCar);
 
     const colorBox = el('div'); colorBox.append(el('h2', '', '车身颜色'));
     const sw = el('div', 'swatches');
@@ -80,7 +80,7 @@ export class Ui {
     group('画质（切换后建筑会重新加载）', qs, (q) => [q.name, q.sub], (q) => q.id, initial.quality, (q) => cb.onQuality(q.id));
 
     const keys = el('p', 'keys');
-    keys.innerHTML = '<b>W/S</b> 油门・刹车/倒车　<b>A/D</b> 转向　<b>空格</b> 手刹<br><b>C</b> 切换视角　<b>鼠标拖动</b> 环顾　<b>滚轮</b> 远近<br><b>L</b> 车灯　<b>R</b> 回到道路　<b>M</b> 地图传送　<b>G</b> 车库';
+    keys.innerHTML = '<b>汽车</b>　W/S 油门・刹车　A/D 转向　空格 手刹<br><b>飞机</b>　W/S 压杆・拉杆　A/D 滚转　Q/E 方向舵　空格/Shift 加减油门<br><b>直升机</b>　W/S 前后　A/D 转向　Q/E 横移　空格/Shift 升降<br><b>C</b> 视角　<b>鼠标</b> 环顾・滚轮远近　<b>L</b> 灯　<b>R</b> 复位　<b>M</b> 地图　<b>N</b> 静音　<b>G</b> 车库';
     this.startBtn.type = 'button';
     this.startBtn.addEventListener('click', () => cb.onStart());
     g.append(keys, this.startBtn, el('p', 'credit', '3D 城市模型: Project PLATEAU（国土交通省）/ 高程・航拍・地图: 国土地理院 / 道路: © OpenStreetMap contributors / 车辆: Kenney (CC0)'));

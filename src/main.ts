@@ -11,7 +11,9 @@ import { TUNNEL_H, Tunnels } from './tunnels/Tunnels';
 import { ROAD_LIFT, RoadSurface } from './roads/RoadSurface';
 import { TilesManager, type Manifest } from './tiles/TilesManager';
 import { CarController, type CarInput } from './car/CarController';
-import { BODY_COLORS, CARS, CarVisual } from './car/garage';
+import { BODY_COLORS, CARS, VEHICLES, CarVisual, initCarLoaders } from './car/garage';
+import { AircraftController, AircraftVisual, AIR_SPAWN_AGL, type AirInput } from './air/Aircraft';
+import { EngineSound } from './audio/EngineSound';
 import { Sky } from './sky/Sky';
 import { Ui } from './ui/ui';
 import { MapView } from './ui/MapView';
@@ -30,6 +32,7 @@ async function boot(): Promise<void> {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, QUALITY[quality].pixelRatio));
   renderer.setSize(window.innerWidth, window.innerHeight, false);
 
+  initCarLoaders(renderer);
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, CAMERA_NEAR, CAMERA_FAR);
   scene.add(camera);
@@ -93,13 +96,18 @@ async function boot(): Promise<void> {
   };
 
   // ---- car
-  let spec = CARS.find((c) => c.id === params.get('car')) ?? CARS[0];
+  let spec = VEHICLES.find((c) => c.id === params.get('car')) ?? CARS[0];
+  const flying = () => spec.kind !== 'car';
+  const airc = new AircraftController(); airc.kind = spec.kind;
+  const airVisual = new AircraftVisual(); airVisual.setKind(spec.kind);
+  scene.add(airVisual.root);
+  const sound = new EngineSound();
   let color = params.get('color') ? '#' + params.get('color') : BODY_COLORS[0];
   visual = new CarVisual();
   scene.add(visual.root);
   const car = new CarController(ground, spec);
-  await visual.load(spec);
-  visual.setColor(color);
+  await visual.load(spec.kind === 'car' ? spec : CARS[0]);
+  visual.setColor(color); airVisual.setColor(color);
 
   // ---- state
   let spawn = SPAWNS.find((s) => s.id === params.get('spawn')) ?? SPAWNS[0];
@@ -120,10 +128,18 @@ async function boot(): Promise<void> {
     car.y = terrain.heightAt(p.x, p.z);
     camHeading = car.heading; look.yaw = 0; look.pitch = 0;
     settled = false;
+    if (flying()) {
+      // aircraft are deployed straight into the air, already flying: no waiting for the ground
+      airc.deploy(p.x, terrain.heightAt(p.x, p.z), p.z, car.heading);
+      syncAir(); settled = true;
+    }
   };
+  /** The camera, HUD and streaming all follow `car`'s pose: mirror the aircraft into it. */
+  const syncAir = () => { car.x = airc.x; car.y = airc.y; car.z = airc.z; car.heading = airc.heading; car.course = airc.heading; car.pitch = airc.pitch; car.roll = airc.roll; car.speed = airc.speed; };
 
   /** Recover (R): nearest road centreline point, else nearest free ground. */
   const recover = (maxCls = 99) => {
+    if (flying()) { airc.deploy(car.x, terrain.heightAt(car.x, car.z), car.z, car.heading); syncAir(); return; }
     const r = roads.nearest(car.x, car.z, 400, maxCls);
     if (r) {
       const g = terrain.heightAt(r.x, r.z, car.y);
@@ -152,11 +168,17 @@ async function boot(): Promise<void> {
   };
 
   const ui = new Ui(document.getElementById('ui')!, {
-    onCar: (s) => { spec = s; car.spec = s; void visual.load(s).then(() => visual.refreshMaterials()); },
-    onColor: (c) => { color = c; visual.setColor(c); },
+    onCar: (s) => {
+      const wasCar = spec.kind === 'car';
+      spec = s; car.spec = s; airc.kind = s.kind; airVisual.setKind(s.kind);
+      if (s.kind === 'car') void visual!.load(s).then(() => visual!.refreshMaterials());
+      // switching between ground and air (or between aircraft) re-deploys at the current place
+      if (wasCar !== (s.kind === 'car') || s.kind !== 'car') { const g = frame.localToLla(car.x, car.y, car.z); teleport(g.lat, g.lon, (car.heading * 180) / Math.PI); }
+    },
+    onColor: (c) => { color = c; visual!.setColor(c); airVisual.setColor(c); },
     onSpawn: (s: SpawnPoint) => { spawn = s; teleport(s.lat, s.lon, s.heading); },
     onQuality: applyQuality,
-    onStart: () => { playing = true; ui.showGarage(false); canvas.focus(); },
+    onStart: () => { playing = true; ui.showGarage(false); canvas.focus(); sound.start(); },
     onOpenGarage: openGarage,
     onCycleCamera: cycleCamera,
     onToggleLights: toggleLights,
@@ -177,13 +199,15 @@ async function boot(): Promise<void> {
 
   // ---- input
   const keys = new Set<string>();
-  const CONTROL = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space']);
+  const CONTROL = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space']);
   window.addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement) return;
     if (CONTROL.has(e.code)) e.preventDefault();
     if (e.repeat) return;
     keys.add(e.code);
-    if (!playing) { if (e.code === 'Enter' && settled) { playing = true; ui.showGarage(false); } return; }
+    if (!playing) { if (e.code === 'Enter' && settled) { playing = true; ui.showGarage(false); sound.start(); } return; }
+    sound.start(); // browsers only allow audio after a key press or click
+    if (e.code === 'KeyN') sound.muted = !sound.muted;
     if (e.code === 'KeyM' || (e.code === 'Escape' && map.open)) { toggleMap(); return; }
     if (map.open) return;
     if (e.code === 'KeyC') cycleCamera();
@@ -199,7 +223,14 @@ async function boot(): Promise<void> {
     input.throttle = k('KeyW', 'ArrowUp'); input.brake = k('KeyS', 'ArrowDown');
     input.steer = k('KeyD', 'ArrowRight') - k('KeyA', 'ArrowLeft');
     input.handbrake = keys.has('Space');
+    const shift = keys.has('ShiftLeft') || keys.has('ShiftRight') ? 1 : 0, space = keys.has('Space') ? 1 : 0;
+    // plane: W pushes the nose down, S pulls up. helicopter: W forward, S backward.
+    airIn.pitch = airc.kind === 'plane' ? input.brake - input.throttle : input.throttle - input.brake;
+    airIn.roll = input.steer;
+    airIn.side = (keys.has('KeyE') ? 1 : 0) - (keys.has('KeyQ') ? 1 : 0);
+    airIn.lift = space - shift;
   };
+  const airIn: AirInput = { pitch: 0, roll: 0, lift: 0, side: 0 };
   canvas.addEventListener('pointerdown', (e) => { if (!playing) return; look.dragging = true; canvas.setPointerCapture(e.pointerId); });
   canvas.addEventListener('pointermove', (e) => {
     if (!look.dragging) return;
@@ -241,7 +272,7 @@ async function boot(): Promise<void> {
       let d = car.heading - camHeading;
       d = Math.atan2(Math.sin(d), Math.cos(d));
       camHeading += d * (1 - Math.exp(-dt * 5));
-      const dist = (camMode === 0 ? 6.8 : 14) * look.zoom, base = camMode === 0 ? 0.36 : 0.39;
+      const dist = (camMode === 0 ? 6.8 : 14) * look.zoom * spec.camDist, base = camMode === 0 ? 0.36 : 0.39;
       const el = Math.max(0.04, Math.min(1.45, base + look.pitch)), a = camHeading + look.yaw;
       camPos.set(car.x - Math.sin(a) * dist * Math.cos(el), car.y + 1.0 + dist * Math.sin(el), car.z + Math.cos(a) * dist * Math.cos(el));
       // looking around aims at the car; straight behind it, aim a little ahead
@@ -250,7 +281,7 @@ async function boot(): Promise<void> {
       camera.up.set(0, 1, 0);
     } else if (camMode === 2 || camMode === 3) {
       // 2: driver's seat (right-hand drive)   3: hood
-      const side = camMode === 2 ? 0.36 : 0, back = camMode === 2 ? -0.25 : 0.25, h = camMode === 2 ? spec.eyeHeight + 0.02 : spec.eyeHeight;
+      const side = camMode === 2 && !flying() ? 0.36 : 0, back = camMode === 2 ? -0.25 : 0.25, h = camMode === 2 ? spec.eyeHeight + 0.02 : spec.eyeHeight;
       camPos.set(car.x + rx * side + fx * back, car.y + h, car.z + rz * side + fz * back);
       const a = car.heading + look.yaw, p = -0.02 - look.pitch + car.pitch;
       lookAt.set(camPos.x + Math.sin(a) * Math.cos(p) * 30, camPos.y + Math.sin(p) * 30, camPos.z - Math.cos(a) * Math.cos(p) * 30);
@@ -279,10 +310,11 @@ async function boot(): Promise<void> {
     camera.updateMatrixWorld();
   };
 
+  let crashes = 0;
   const grabs: ((f: { w: number; h: number; px: Uint8Array }) => void)[] = [];
   // ---- loop
   const fps = { frames: 0, t: performance.now(), value: 0, worst: 0 };
-  let last = performance.now(), lastTerrain = -1e9, frameNo = 0, tilesVersion = -1, slowSeconds = 0, lightsOn = false;
+  let last = performance.now(), lastTerrain = -1e9, frameNo = 0, tilesVersion = -1, slowSeconds = 0, lightsOn = false, airMode = false, crashAt = 0;
   const loop = (now: number) => {
     requestAnimationFrame(loop);
     if (document.hidden) { last = now; return; }
@@ -299,7 +331,16 @@ async function boot(): Promise<void> {
       else if (fps.value > 57 && resScale < 1) resScale = Math.min(1, resScale + 0.1);
       if (resScale !== before) onResize();
       // surface friction: asphalt on a road ribbon or in a tunnel, loose ground elsewhere
-      if (inTunnel) car.surfaceGrip = 1;
+      if (flying()) {
+        // from the air: see further, accept simplified distant buildings, keep the frame rate
+        const f = Math.max(0, Math.min(4, (car.y - terrain.heightAt(car.x, car.z)) / 200));
+        tiles.loadDistance = QUALITY[quality].loadDistance * (1 + f * 0.8);
+        tiles.setErrorTarget(QUALITY[quality].errorTarget * (1 + f * 2.5));
+        tiles.setCoarseVisible(f > 0.75);
+        airMode = true;
+      } else if (airMode) { airMode = false; tiles.loadDistance = QUALITY[quality].loadDistance; tiles.setErrorTarget(QUALITY[quality].errorTarget); tiles.setCoarseVisible(false); }
+      if (flying()) { /* no tyres on the ground */ }
+      else if (inTunnel) car.surfaceGrip = 1;
       else if (roads.enabled && roads.hasData(car.x, car.z)) { const r = roads.nearest(car.x, car.z, 14); car.surfaceGrip = r && r.dist <= r.width / 2 + 1.2 ? 1 : 0.62; } else car.surfaceGrip = 1;
     }
     if (tiles.version !== tilesVersion) { tilesVersion = tiles.version; sky.invalidateShadows(); }
@@ -322,12 +363,23 @@ async function boot(): Promise<void> {
       }
     } else if (playing && !map.open) {
       readInput();
-      car.update(dt, input);
+      if (flying()) {
+        const gy = terrain.heightAt(car.x, car.z, car.y);
+        if (airc.crashed) { if (now - crashAt > 1200) { airc.deploy(car.x, gy, car.z, car.heading); } }
+        else {
+          airc.update(dt, airIn, gy);
+          // hitting the ground, water or a building ends the flight; it restarts in the air
+          const floor = Math.max(terrain.heightAt(airc.x, airc.z, airc.y), obstacles.heightAt(airc.x, airc.z));
+          if (airc.y < floor + 1.2) { airc.y = floor + 1.2; airc.crashed = true; airc.speed = 0; crashAt = now; crashes++; }
+        }
+        syncAir();
+      } else car.update(dt, input);
     }
     ui.setStartEnabled(settled, settled ? '出发' : '加载中…');
 
     // tunnels: lights come on by themselves
-    if (settled) { ground.samples--; ground.surface(car.x, car.z, car.y); inTunnel = ground.lastInTunnel; }
+    if (flying()) inTunnel = false;
+    else if (settled) { ground.samples--; ground.surface(car.x, car.z, car.y); inTunnel = ground.lastInTunnel; }
     const wantLights = headlights || inTunnel;
     if (wantLights !== lightsOn) { lightsOn = wantLights; visual.setHeadlights(lightsOn); }
 
@@ -335,8 +387,14 @@ async function boot(): Promise<void> {
     visual.root.rotation.set(car.pitch, -car.heading, -car.roll, 'YXZ');
     visual.animate(car.wheelSpin, car.steer);
     const firstPerson = playing && (camMode === 2 || camMode === 3);
-    visual.root.visible = !firstPerson;
-    ui.setCockpit(playing && camMode === 2, car.steer);
+    visual.root.visible = !firstPerson && !flying();
+    airVisual.root.visible = flying() && !firstPerson;
+    airVisual.root.position.set(car.x, car.y, car.z);
+    airVisual.root.rotation.set(car.pitch, -car.heading, -car.roll, 'YXZ');
+    airVisual.animate(airc);
+    ui.setCockpit(playing && camMode === 2 && !flying(), car.steer);
+    if (flying()) sound.update(spec.engine, airc.rpm, airc.load, Math.abs(airc.speed), playing && !map.open && !airc.crashed);
+    else sound.update(spec.engine, car.rpm, car.throttle, Math.abs(car.speed), playing && !map.open);
 
     updateCamera(dt, now);
     tiles.update(car.x, car.z, now);
@@ -350,14 +408,18 @@ async function boot(): Promise<void> {
     if (playing && frameNo % 6 === 0) {
       const pending = tiles.pending + terrain.pendingChunks;
       const road = roads.nameAt(car.x, car.z);
-      ui.setHud(car.speed * 3.6, tiles.placeName(car.x, car.z), inTunnel ? (road ? road + '（隧道）' : '隧道') : road, CAMS[camMode], lightsOn, pending > 0 ? `加载中 ${pending}` : '');
+      const info = flying()
+        ? `离地 ${Math.max(0, Math.round(car.y - terrain.heightAt(car.x, car.z)))} m${airc.kind === 'plane' ? ` · 油门 ${Math.round(airc.throttle * 100)}%` : ''}${airc.crashed ? ' · 坠毁，重新部署中' : ''}`
+        : `${inTunnel ? (road ? road + '（隧道）' : '隧道') : road}${road || inTunnel ? ' · ' : ''}${car.speed < -0.3 ? 'R' : car.gear} 挡 ${Math.round(car.rpm / 100) * 100} rpm`;
+      ui.setHud(car.speed * 3.6, tiles.placeName(car.x, car.z), info, CAMS[camMode], lightsOn, pending > 0 ? `加载中 ${pending}` : '');
     }
   };
   requestAnimationFrame(loop);
 
   // ---- debug / test hooks (used by scripts/headless-check.mjs)
   (window as any).__td = {
-    car, ground, terrain, tiles, obstacles, roads, decks, tunnels, roadSurface, vegetation, sky, camera, renderer, fps, frame, look, map,
+    car, airc, sound, get flying() { return flying(); }, get crashes() { return crashes; }, AIR_SPAWN_AGL,
+    ground, terrain, tiles, obstacles, roads, decks, tunnels, roadSurface, vegetation, sky, camera, renderer, fps, frame, look, map,
     get settled() { return settled; }, get playing() { return playing; }, get inTunnel() { return inTunnel; },
     teleport, recover,
     /** Test helper: snap to the nearest road of at least the given class (0 motorway … 12 living street). */
