@@ -3,6 +3,7 @@
 // dimmed and refused. Base map: GSI pale tiles (public, no key).
 import { latToTileY, lonToTileX, tileXToLon, tileYToLat } from '../geo/geodesy';
 import type { SpawnPoint } from '../config';
+import { onLangChange, t } from '../i18n';
 
 export interface MapOptions {
   bounds: { west: number; south: number; east: number; north: number };
@@ -27,8 +28,10 @@ export class MapView {
   constructor(private opt: MapOptions) {
     this.el.className = 'mapview hidden';
     const bar = document.createElement('div'); bar.className = 'mapbar';
-    const title = document.createElement('span'); title.textContent = '地图 — 点击亮色区域传送（滚轮缩放，拖动平移）';
-    const close = document.createElement('button'); close.type = 'button'; close.textContent = '关闭 M'; close.className = 'menu-btn static';
+    const title = document.createElement('span');
+    const close = document.createElement('button'); close.type = 'button'; close.className = 'menu-btn static';
+    const label = () => { title.textContent = t('map.title'); close.textContent = t('map.close'); if (this.open) this.draw(); };
+    label(); onLangChange(label);
     close.addEventListener('click', () => opt.onClose());
     bar.append(title, close);
     this.note.className = 'mapnote';
@@ -50,7 +53,7 @@ export class MapView {
       const tx = this.cx + (e.clientX - r.left - r.width / 2) / 256, ty = this.cy + (e.clientY - r.top - r.height / 2) / 256;
       const lat = tileYToLat(ty, this.z), lon = tileXToLon(tx, this.z);
       if (opt.covers(lat, lon)) opt.onPick(lat, lon);
-      else this.flash('这里不在已准备的数据范围内');
+      else this.flash(t('map.outside'));
     });
     this.canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
@@ -129,8 +132,8 @@ export class MapView {
       const x = px(lonToTileX(s.lon, this.z)), y = py(latToTileY(s.lat, this.z));
       ctx.fillStyle = '#14110f'; ctx.beginPath(); ctx.arc(x, y, 5.5, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2); ctx.fill();
-      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.strokeText(s.name, x + 9, y);
-      ctx.fillStyle = '#14110f'; ctx.fillText(s.name, x + 9, y);
+      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.strokeText(t(`spawn.${s.id}`), x + 9, y);
+      ctx.fillStyle = '#14110f'; ctx.fillText(t(`spawn.${s.id}`), x + 9, y);
     }
     // car
     const cxp = px(lonToTileX(this.car.lon, this.z)), cyp = py(latToTileY(this.car.lat, this.z));

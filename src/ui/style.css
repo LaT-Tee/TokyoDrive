@@ -103,3 +103,4 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0c0e12; col
 .token-row .opt { flex: none; padding: 8px 14px; }
 .hint { color: var(--dim); font-size: 11px; line-height: 1.6; margin: 6px 0 0; }
 .credits { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); max-width: 60%; font-size: 10.5px; color: rgba(244, 241, 234, 0.85); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.grid.lang { grid-template-columns: repeat(3, 1fr); }

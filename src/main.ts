@@ -19,6 +19,7 @@ import { EngineSound, ENGINE_WORKLET_SRC } from './audio/EngineSound';
 import { Sky } from './sky/Sky';
 import { Ui } from './ui/ui';
 import { MapView } from './ui/MapView';
+import { cityName, t as tr } from './i18n'; // `t` is the terrain config below
 
 const params = new URLSearchParams(location.search);
 const canvas = document.getElementById('view') as HTMLCanvasElement;
@@ -124,7 +125,7 @@ async function boot(): Promise<void> {
   let settled = false;       // car has been placed on loaded ground
   let headlights = false;    // driver's switch (L)
   let inTunnel = false;
-  const CAMS = ['追尾', '远追尾', '车内', '引擎盖', '俯视'] as const;
+  const CAMS = ['cam.chase', 'cam.far', 'cam.cockpit', 'cam.hood', 'cam.top'] as const; // i18n keys
   let camMode = 0;
   let camHeading = 0;
   let garageOrbit = 0;
@@ -393,7 +394,7 @@ async function boot(): Promise<void> {
         syncAir();
       } else car.update(dt, input);
     }
-    ui.setStartEnabled(settled, settled ? '出发' : '加载中…');
+    ui.setStartEnabled(settled);
 
     // tunnels: lights come on by themselves
     if (flying()) inTunnel = false;
@@ -426,16 +427,17 @@ async function boot(): Promise<void> {
     if (grabs.length) { const gl = renderer.getContext(); const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight; const px = new Uint8Array(w * h * 4); gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px); for (const g of grabs.splice(0)) g({ w, h, px }); }
 
     if (frameNo % 15 === 0) {
-      ui.setGoogleStatus(({ off: '未启用', loading: '连接中…', on: '已启用', error: '失败：' + googleFill.message } as const)[googleFill.status]);
+      ui.setGoogleStatus(googleFill.status === 'error' ? tr('google.error', { msg: googleFill.message }) : tr(`google.${googleFill.status}`));
       ui.setCredits(googleFill.credits);
     }
     if (playing && frameNo % 6 === 0) {
       const pending = tiles.pending + terrain.pendingChunks;
       const road = roads.nameAt(car.x, car.z);
       const info = flying()
-        ? `离地 ${Math.max(0, Math.round(car.y - terrain.heightAt(car.x, car.z)))} m${airc.kind === 'plane' ? ` · 油门 ${Math.round(airc.throttle * 100)}%` : ''}${airc.crashed ? ' · 坠毁，重新部署中' : ''}`
-        : `${inTunnel ? (road ? road + '（隧道）' : '隧道') : road}${road || inTunnel ? ' · ' : ''}${car.speed < -0.3 ? 'R' : car.gear} 挡 ${Math.round(car.rpm / 100) * 100} rpm`;
-      ui.setHud(car.speed * 3.6, tiles.placeName(car.x, car.z), info, CAMS[camMode], lightsOn, pending > 0 ? `加载中 ${pending}` : '');
+        ? [tr('hud.agl', { m: Math.max(0, Math.round(car.y - terrain.heightAt(car.x, car.z))) }), airc.kind === 'plane' ? tr('hud.throttle', { p: Math.round(airc.throttle * 100) }) : '', airc.crashed ? tr('hud.crashed') : ''].filter(Boolean).join(' · ')
+        : [inTunnel ? (road ? tr('hud.roadTunnel', { road }) : tr('hud.tunnel')) : road, tr('hud.gear', { g: car.speed < -0.3 ? 'R' : car.gear, rpm: Math.round(car.rpm / 100) * 100 })].filter(Boolean).join(' · ');
+      const place = tiles.placeName(car.x, car.z);
+      ui.setHud(car.speed * 3.6, cityName(place.code, place.name), info, tr(CAMS[camMode]), lightsOn, pending > 0 ? tr('hud.loading', { n: pending }) : '');
     }
   };
   requestAnimationFrame(loop);

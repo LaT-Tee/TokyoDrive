@@ -452,12 +452,12 @@ export class TilesManager implements DeckProvider {
   get activeCount(): number { return this.entries.reduce((n, e) => n + (e.tiles ? 1 : 0), 0); }
 
   /** Municipality whose bounds contain (x, z), for the HUD. */
-  placeName(x: number, z: number): string {
-    let best = '', area = Infinity;
+  placeName(x: number, z: number): { code: string; name: string } {
+    let best = { code: '', name: '' }, area = Infinity;
     for (const e of this.entries) {
       if (e.def.type !== 'bldg' || x < e.minX || x > e.maxX || z < e.minZ || z > e.maxZ) continue;
       const a = (e.maxX - e.minX) * (e.maxZ - e.minZ);
-      if (a < area) { area = a; best = e.def.city; }
+      if (a < area) { area = a; best = { code: e.def.cityCode, name: e.def.city }; }
     }
     return best;
   }
