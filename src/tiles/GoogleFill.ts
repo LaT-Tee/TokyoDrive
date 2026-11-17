@@ -180,16 +180,33 @@ export class GoogleFill {
 /** GLSL inserted into the facade shader: replaces `diffuseColor.rgb` with Google's colour on a depth match. */
 export const GOOGLE_FACADE_GLSL = /* glsl */ `
   if (tdGOn > 0.5) {
-    vec2 tdUv = gl_FragCoord.xy / tdGRes;
-    vec4 tdC = texture2D(tdGColor, tdUv);
-    float tdD = texture2D(tdGDepth, tdUv).r;
-    // perspective depth -> distance along the view axis
-    float tdGz = (tdGNearFar.x * tdGNearFar.y) / (tdGNearFar.y - tdD * (tdGNearFar.y - tdGNearFar.x));
+    // Google's photogrammetry never lines up exactly with PLATEAU's walls: surfaces bulge,
+    // sag and are often shifted a few metres. A strict per-pixel depth match therefore
+    // breaks a wall into patches. Instead:
+    //  - tolerances are asymmetric: Google's surface lying BEHIND the wall (recessed, or a
+    //    slightly smaller scanned building) is accepted generously; one IN FRONT of it (a
+    //    tree, another building) only within a small margin;
+    //  - five samples around the pixel vote, and the accepted ones are averaged, which
+    //    removes the ragged patch edges.
     float tdFz = -(viewMatrix * vec4(tdWP, 1.0)).z;
-    // same surface = within ~1 m near the camera, a few metres further out (photogrammetry vs. PLATEAU)
-    float tdTol = 0.8 + tdFz * 0.006;
-    float tdHit = tdC.a * (1.0 - smoothstep(tdTol, tdTol * 1.6, abs(tdGz - tdFz)))
-                * (1.0 - smoothstep(tdGRange * 0.8, tdGRange, tdFz));
-    diffuseColor.rgb = mix(diffuseColor.rgb, tdC.rgb, tdHit);
+    // Measure the mismatch as distance from the wall's plane, not along the view ray: street
+    // walls are seen at grazing angles, where a small shift of the scanned wall moves the
+    // hit point far along the ray while it stays close to the wall.
+    float tdCos = max(abs(dot(normalize(tdWN), normalize(tdWP - cameraPosition))), 0.12);
+    float tdBack = 2.5 + tdFz * 0.01, tdFront = 1.2 + tdFz * 0.005;
+    vec2 tdUv = gl_FragCoord.xy / tdGRes;
+    vec2 tdTx = 3.0 / vec2(textureSize(tdGColor, 0));
+    vec3 tdSum = vec3(0.0); float tdW = 0.0;
+    for (int k = 0; k < 5; k++) {
+      vec2 o = k == 0 ? vec2(0.0) : k == 1 ? vec2(tdTx.x, 0.0) : k == 2 ? vec2(-tdTx.x, 0.0) : k == 3 ? vec2(0.0, tdTx.y) : vec2(0.0, -tdTx.y);
+      vec4 c = texture2D(tdGColor, tdUv + o);
+      float d = texture2D(tdGDepth, tdUv + o).r;
+      float gz = (tdGNearFar.x * tdGNearFar.y) / (tdGNearFar.y - d * (tdGNearFar.y - tdGNearFar.x));
+      float dz = (gz - tdFz) * tdCos;                         // > 0: Google surface is behind the wall plane
+      float ok = c.a * (dz >= 0.0 ? 1.0 - smoothstep(tdBack, tdBack * 1.5, dz) : 1.0 - smoothstep(tdFront, tdFront * 1.5, -dz));
+      tdSum += c.rgb * ok; tdW += ok;
+    }
+    float tdHit = smoothstep(0.15, 0.6, tdW / 5.0) * (1.0 - smoothstep(tdGRange * 0.8, tdGRange, tdFz));
+    if (tdW > 0.0) diffuseColor.rgb = mix(diffuseColor.rgb, tdSum / tdW, tdHit);
   }
 `;
