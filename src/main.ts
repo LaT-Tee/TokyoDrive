@@ -442,7 +442,7 @@ async function boot(): Promise<void> {
 
   // ---- debug / test hooks (used by scripts/headless-check.mjs)
   (window as any).__td = {
-    THREE, car, airc, sound, googleFill, facadeBaker, ENGINE_WORKLET_SRC, get flying() { return flying(); }, get crashes() { return crashes; }, AIR_SPAWN_AGL,
+    THREE, car, visual, airc, sound, googleFill, facadeBaker, ENGINE_WORKLET_SRC, get flying() { return flying(); }, get crashes() { return crashes; }, AIR_SPAWN_AGL,
     ground, terrain, tiles, obstacles, roads, decks, tunnels, roadSurface, vegetation, sky, camera, renderer, fps, frame, look, map,
     get settled() { return settled; }, get playing() { return playing; }, get inTunnel() { return inTunnel; },
     teleport, recover,
