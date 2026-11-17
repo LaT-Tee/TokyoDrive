@@ -2,12 +2,12 @@
  "mode": "spawns",
  "base": "http://localhost:5173",
  "quality": "balanced",
- "date": "2026-11-15T23:29:26.304Z",
+ "date": "2026-11-17T13:21:01.054Z",
  "results": {
   "spawn-shinjuku": {
    "pass": true,
    "settle": {
-    "waitedMs": 19306,
+    "waitedMs": 18601,
     "pending": 0,
     "terrainReady": true
    },
@@ -25,7 +25,7 @@
   "spawn-tokyo": {
    "pass": true,
    "settle": {
-    "waitedMs": 29311,
+    "waitedMs": 2024,
     "pending": 0,
     "terrainReady": true
    },
@@ -43,7 +43,7 @@
   "spawn-fuchu": {
    "pass": true,
    "settle": {
-    "waitedMs": 2790,
+    "waitedMs": 3296,
     "pending": 0,
     "terrainReady": true
    },
@@ -61,7 +61,7 @@
   "spawn-tachikawa": {
    "pass": true,
    "settle": {
-    "waitedMs": 10956,
+    "waitedMs": 12415,
     "pending": 0,
     "terrainReady": true
    },
@@ -79,7 +79,7 @@
   "spawn-minatomirai": {
    "pass": true,
    "settle": {
-    "waitedMs": 9967,
+    "waitedMs": 9778,
     "pending": 0,
     "terrainReady": true
    },
@@ -97,7 +97,7 @@
   "spawn-rainbow": {
    "pass": true,
    "settle": {
-    "waitedMs": 12422,
+    "waitedMs": 13299,
     "pending": 0,
     "terrainReady": true
    },

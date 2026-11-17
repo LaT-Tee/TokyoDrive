@@ -10,6 +10,7 @@ import { Decks } from './decks/Decks';
 import { TUNNEL_H, Tunnels } from './tunnels/Tunnels';
 import { ROAD_LIFT, RoadSurface } from './roads/RoadSurface';
 import { TilesManager, type Manifest } from './tiles/TilesManager';
+import { GoogleFill } from './tiles/GoogleFill';
 import { CarController, type CarInput } from './car/CarController';
 import { BODY_COLORS, CARS, VEHICLES, CarVisual, initCarLoaders } from './car/garage';
 import { AircraftController, AircraftVisual, AIR_SPAWN_AGL, type AirInput } from './air/Aircraft';
@@ -70,6 +71,10 @@ async function boot(): Promise<void> {
   ground.decks.push(tiles, decks);
   ground.tunnels = tunnels;
   ground.onRoad = (x, z) => { const r = roads.nearest(x, z, 12); return !!r && r.dist <= r.width / 2 - 0.3; };
+  const googleFill = new GoogleFill(camera, renderer, terrain, obstacles, roads);
+  scene.add(googleFill.group);
+  const readToken = () => { try { return localStorage.getItem('td.googleToken') ?? ''; } catch { return ''; } };
+  const googleToken = readToken() || (import.meta.env.VITE_CESIUM_ION_TOKEN as string | undefined) || (import.meta.env.VITE_GOOGLE_MAPS_KEY as string | undefined) || '';
   const sky = new Sky(renderer, scene, camera);
   void terrain.buildSafetyGround(manifest.bounds, t.safetyDem.map(abs), t.safetyPhoto.map(abs));
 
@@ -83,7 +88,8 @@ async function boot(): Promise<void> {
     tiles.textureNear = QUALITY[q].textureNear; tiles.textureFar = QUALITY[q].textureFar;
     tiles.setCacheLimit(QUALITY[q].cacheGB);
     sky.setShadows(QUALITY[q].shadowSize, QUALITY[q].shadowRange);
-    tiles.nearRange = Math.max(160, QUALITY[q].shadowRange + 60);
+    // load the real models all around the car, not only in view, so turning never reveals gaps
+    tiles.nearRange = Math.max(420, QUALITY[q].shadowRange + 60);
     sky.setAerial(QUALITY[q].aerial);
     vegetation.enabled = q !== 'performance';
     resScale = 1;
@@ -184,7 +190,12 @@ async function boot(): Promise<void> {
     onToggleLights: toggleLights,
     onMap: toggleMap,
     onRecover: () => recover(),
-  }, { car: spec.id, color, spawn: spawn.id, quality });
+    onGoogleToken: (token) => {
+      try { if (token.trim()) localStorage.setItem('td.googleToken', token.trim()); else localStorage.removeItem('td.googleToken'); } catch { /* private window */ }
+      googleFill.setToken(token);
+    },
+  }, { car: spec.id, color, spawn: spawn.id, quality, googleToken });
+  if (googleToken) googleFill.setToken(googleToken);
   const map = new MapView({
     bounds: manifest.bounds,
     coverage: manifest.tilesets.filter((s) => s.type === 'bldg').map((s) => s.bounds),
@@ -336,9 +347,11 @@ async function boot(): Promise<void> {
         const f = Math.max(0, Math.min(4, (car.y - terrain.heightAt(car.x, car.z)) / 200));
         tiles.loadDistance = QUALITY[quality].loadDistance * (1 + f * 0.8);
         tiles.setErrorTarget(QUALITY[quality].errorTarget * (1 + f * 2.5));
-        tiles.setCoarseVisible(f > 0.75);
+        // distant white boxes so the city does not end at the edge of the detailed layer
+        tiles.farEnabled = true;
+        tiles.farDistance = Math.min(12000, 3500 + f * 200 * 10);
         airMode = true;
-      } else if (airMode) { airMode = false; tiles.loadDistance = QUALITY[quality].loadDistance; tiles.setErrorTarget(QUALITY[quality].errorTarget); tiles.setCoarseVisible(false); }
+      } else if (airMode) { airMode = false; tiles.loadDistance = QUALITY[quality].loadDistance; tiles.setErrorTarget(QUALITY[quality].errorTarget); tiles.farEnabled = false; }
       if (flying()) { /* no tyres on the ground */ }
       else if (inTunnel) car.surfaceGrip = 1;
       else if (roads.enabled && roads.hasData(car.x, car.z)) { const r = roads.nearest(car.x, car.z, 14); car.surfaceGrip = r && r.dist <= r.width / 2 + 1.2 ? 1 : 0.62; } else car.surfaceGrip = 1;
@@ -349,7 +362,10 @@ async function boot(): Promise<void> {
       lastTerrain = now;
       terrain.update(car.x, car.z, QUALITY[quality].terrainRadius, car.y);
       roads.update(car.x, car.z); decks.update(car.x, car.z); tunnels.update(car.x, car.z);
-      roadSurface.update(car.x, car.z); vegetation.update(car.x, car.z);
+      roadSurface.update(car.x, car.z);
+      // Google's photogrammetry already has the real trees: do not add procedural ones on top
+      vegetation.enabled = quality !== 'performance' && googleFill.status !== 'on';
+      vegetation.update(car.x, car.z);
     }
 
     if (!settled) {
@@ -398,6 +414,7 @@ async function boot(): Promise<void> {
 
     updateCamera(dt, now);
     tiles.update(car.x, car.z, now);
+    googleFill.update(car.x, car.z);
     obstacles.update(2.5);
     groundUniforms.tdTime.value = now / 1000;
     focus.set(car.x, car.y, car.z);
@@ -405,6 +422,10 @@ async function boot(): Promise<void> {
     sky.render(dt);
     if (grabs.length) { const gl = renderer.getContext(); const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight; const px = new Uint8Array(w * h * 4); gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px); for (const g of grabs.splice(0)) g({ w, h, px }); }
 
+    if (frameNo % 15 === 0) {
+      ui.setGoogleStatus(({ off: '未启用', loading: '连接中…', on: '已启用', error: '失败：' + googleFill.message } as const)[googleFill.status]);
+      ui.setCredits(googleFill.credits);
+    }
     if (playing && frameNo % 6 === 0) {
       const pending = tiles.pending + terrain.pendingChunks;
       const road = roads.nameAt(car.x, car.z);
@@ -418,7 +439,7 @@ async function boot(): Promise<void> {
 
   // ---- debug / test hooks (used by scripts/headless-check.mjs)
   (window as any).__td = {
-    car, airc, sound, ENGINE_WORKLET_SRC, get flying() { return flying(); }, get crashes() { return crashes; }, AIR_SPAWN_AGL,
+    car, airc, sound, googleFill, ENGINE_WORKLET_SRC, get flying() { return flying(); }, get crashes() { return crashes; }, AIR_SPAWN_AGL,
     ground, terrain, tiles, obstacles, roads, decks, tunnels, roadSurface, vegetation, sky, camera, renderer, fps, frame, look, map,
     get settled() { return settled; }, get playing() { return playing; }, get inTunnel() { return inTunnel; },
     teleport, recover,

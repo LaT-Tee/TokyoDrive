@@ -27,10 +27,11 @@ class TdEngine extends AudioWorkletProcessor {
     this.lp = [0, 0, 0]; this.dc = [0, 0]; this.sub = 0; this.env = [0.01, 0.01];
     this.overrun = 0;          // seconds of crackle left after lifting off
     this.popEnv = 0; this.popLow = 0; this.popNoise = 0; this.cut = 0;
+    this.tq = 0; this.want = 0.1; // smoothed torque and loudness target
     this.seed = 22222;
     this.port.onmessage = (m) => {
       const d = m.data;
-      if (d.gear !== undefined && d.gear > this.p.gear && this.p.load > 0.4) { this.cut = 0.07; this.pendingBang = 0.07; } // up-shift under power
+      if (d.gear !== undefined && d.gear > this.p.gear && this.p.load > 0.4) { this.cut = 0.06; this.pendingBang = 0.05; } // up-shift under power: a brief lift, never silence
       // lift-off at high revs: fuel burns in the hot exhaust for a second or two
       if (d.load < 0.08 && this.p.load >= 0.3 && d.rpm > d.redline * 0.42) this.overrun = 0.9 + 1.6 * Math.min(1, d.rpm / d.redline);
       Object.assign(this.p, d);
@@ -57,7 +58,11 @@ class TdEngine extends AudioWorkletProcessor {
       const rev = Math.min(1, this.rpm / p.redline);
       if (this.cut > 0) this.cut -= dt;
       if (this.pendingBang > 0) { this.pendingBang -= dt; if (this.pendingBang <= 0) this.pop(0.9 + rev * 0.5); }
-      const torque = this.cut > 0 ? 0.05 : this.load;
+      // During a shift the throttle is only partly lifted; ramp in and out over a few ms
+      // so the pulses thin out and the pitch falls instead of the sound dropping out.
+      const tqTarget = this.cut > 0 ? this.load * 0.4 : this.load;
+      this.tq += (tqTarget - this.tq) * (tqTarget < this.tq ? 0.004 : 0.0025);
+      const torque = this.tq;
 
       // --- firing: one pressure pulse per cylinder per engine cycle
       this.cycle += (this.rpm / 120) * dt;
@@ -116,7 +121,9 @@ class TdEngine extends AudioWorkletProcessor {
         // slow level control: every engine layout lands at the same loudness for a given
         // throttle, quiet when coasting so the pops stand clear of it
         this.env[b] += (ac * ac - this.env[b]) * 0.00008;
-        const want = 0.07 + 0.3 * torque + 0.06 * rev;
+        // loudness target follows the throttle slowly (~120 ms), so a shift dips it only a little
+        if (b === 0) this.want += ((0.07 + 0.3 * this.load + 0.06 * rev) - this.want) * 0.00018;
+        const want = this.want;
         const agc = Math.min(4, want / Math.max(0.02, Math.sqrt(this.env[b])));
         const s = Math.tanh((ac * agc + pops * 0.9) * drive);
         (b ? R : L)[i] = s * this.gain * 0.9;

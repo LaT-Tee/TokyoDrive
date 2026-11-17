@@ -13,6 +13,7 @@ export interface UiCallbacks {
   onToggleLights(): void;
   onMap(): void;
   onRecover(): void;
+  onGoogleToken(token: string): void;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -32,11 +33,13 @@ export class Ui {
   private lightBtn = el('button', 'hud-btn');
   private loading = el('div', 'loading hidden');
   private startBtn = el('button', 'go', '出发');
+  private googleStatus = el('p', 'hint');
+  private credits = el('div', 'credits');
   private cockpit = el('div', 'cockpit hidden');
   private wheel = el('div', 'wheel');
   private lastSpeed = -1; private lastCity = ''; private lastRoad = ''; private lastCam = ''; private lastLights: boolean | null = null;
 
-  constructor(root: HTMLElement, cb: UiCallbacks, initial: { car: string; color: string; spawn: string; quality: Quality }) {
+  constructor(root: HTMLElement, cb: UiCallbacks, initial: { car: string; color: string; spawn: string; quality: Quality; googleToken: string }) {
     const g = this.garage;
     const head = el('div');
     const h1 = el('h1'); h1.append('TOKYO ', el('span', '', 'DRIVE'));
@@ -79,6 +82,17 @@ export class Ui {
     ];
     group('画质（切换后建筑会重新加载）', qs, (q) => [q.name, q.sub], (q) => q.id, initial.quality, (q) => cb.onQuality(q.id));
 
+    // optional Google 3D fill (player's own key; stored only in this browser)
+    const gBox = el('div'); gBox.append(el('h2', '', 'Google 3D 补全（可选）'));
+    const gRow = el('div', 'token-row');
+    const gIn = el('input'); gIn.type = 'password'; gIn.placeholder = 'Cesium ion 令牌 或 Google Maps API key'; gIn.value = initial.googleToken; gIn.autocomplete = 'off'; gIn.spellcheck = false;
+    gIn.setAttribute('aria-label', 'Cesium ion 令牌或 Google Maps API key');
+    const gBtn = el('button', 'opt', '应用'); gBtn.type = 'button';
+    gBtn.addEventListener('click', () => { cb.onGoogleToken(gIn.value); gBtn.blur(); });
+    gRow.append(gIn, gBtn);
+    gBox.append(gRow, this.googleStatus, el('p', 'hint', 'PLATEAU 没有模型的地方用 Google 扫描模型补上（寺庙、公园建筑、树等）。留空即关闭。令牌只保存在本浏览器。'));
+    g.append(gBox);
+
     const keys = el('p', 'keys');
     keys.innerHTML = '<b>汽车</b>　W/S 油门・刹车　A/D 转向　空格 手刹<br><b>飞机</b>　W/S 压杆・拉杆　A/D 滚转　Q/E 方向舵　空格/Shift 加减油门<br><b>直升机</b>　W/S 前后　A/D 转向　Q/E 横移　空格/Shift 升降<br><b>C</b> 视角　<b>鼠标</b> 环顾・滚轮远近　<b>L</b> 灯　<b>R</b> 复位　<b>M</b> 地图　<b>N</b> 静音　<b>G</b> 车库';
     this.startBtn.type = 'button';
@@ -97,9 +111,12 @@ export class Ui {
     btn(this.lightBtn, '车灯 L', cb.onToggleLights);
     // cockpit overlay: dashboard + steering wheel (right-hand drive)
     const dash = el('div', 'dash'); this.wheel.append(el('div', 'spoke'), el('div', 'spoke v')); this.cockpit.append(el('div', 'pillar l'), el('div', 'pillar r'), dash, this.wheel);
-    h.append(this.cockpit, speed, place, bar, this.loading);
+    h.append(this.cockpit, speed, place, bar, this.loading, this.credits);
     root.append(h, g);
   }
+
+  setGoogleStatus(text: string): void { if (this.googleStatus.textContent !== text) this.googleStatus.textContent = text; }
+  setCredits(text: string): void { if (this.credits.textContent !== text) this.credits.textContent = text; }
 
   showGarage(show: boolean): void {
     this.garage.classList.toggle('hidden', !show);

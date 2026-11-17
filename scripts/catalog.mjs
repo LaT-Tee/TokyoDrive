@@ -43,11 +43,12 @@ const all = cat.latest_datasets.filter((d) => d.format === '3D Tiles' && ['bldg'
 const code = (d) => d.ward_code || d.city_code;
 const inTokyo = (c) => c.startsWith('13') && +c < 13360 && !EXCLUDED.has(c); // < 13360 drops the islands
 const inYokohama = (c) => c === '14100' || (+c >= 14101 && +c <= 14118);
+const inKawasaki = (c) => c === '14130' || (+c >= 14131 && +c <= 14137); // added by the owner (was out of scope)
 
 const byCity = new Map();
 for (const d of all) {
   const c = code(d);
-  if (!inTokyo(c) && !inYokohama(c)) continue;
+  if (!inTokyo(c) && !inYokohama(c) && !inKawasaki(c)) continue;
   if (!byCity.has(c)) byCity.set(c, []);
   byCity.get(c).push(d);
 }
@@ -65,8 +66,9 @@ function pick(list, type) {
 
 const tilesets = [];
 for (const [c, list] of [...byCity].sort()) {
-  for (const typeKey of ['bldg', 'brid', 'veg:SolitaryVegetationObject', 'veg:PlantCover', 'frn']) {
-    const type = typeKey.split(':')[0];
+  for (const typeKey of ['bldg', 'bldg:lod1', 'brid', 'veg:SolitaryVegetationObject', 'veg:PlantCover', 'frn']) {
+    // 'bldg:lod1' = white boxes for the far view from the air (a second layer next to the detailed one)
+    const type = typeKey === 'bldg:lod1' ? 'bldgFar' : typeKey.split(':')[0];
     const d = pick(list, typeKey);
     if (!d) continue;
     const ts = await getJson(d.url);
@@ -81,7 +83,7 @@ for (const [c, list] of [...byCity].sort()) {
     // resolve the wrapper to the real asset tileset (needed for downloading)
     const inner = ts.root?.children?.[0]?.content?.uri ?? null;
     tilesets.push({
-      id: d.id, cityCode: c, city: d.ward ? `${d.city}${d.ward}` : d.city, type, lod: +d.lod, texture: !!d.texture,
+      id: type === 'bldgFar' ? d.id + '~far' : d.id, cityCode: c, city: d.ward ? `${d.city}${d.ward}` : d.city, type, lod: +d.lod, texture: !!d.texture,
       remoteUrl: d.url, assetUrl: inner, fileSize: d.file_size ?? null,
       bounds: Object.fromEntries(Object.entries(bounds).map(([k, v]) => [k, +v.toFixed(6)])),
     });

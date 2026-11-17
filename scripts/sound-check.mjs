@@ -8,8 +8,11 @@ const browser = await chromium.launch({ channel: process.env.PW_CHANNEL ?? 'chro
 const page = await browser.newPage();
 await page.goto(`${process.env.BASE_URL ?? 'http://localhost:5173'}/?autostart=1`);
 await page.waitForFunction(() => window.__td?.ENGINE_WORKLET_SRC, null, { timeout: 120000 });
-const res = await page.evaluate(async () => {
-  const src = window.__td.ENGINE_WORKLET_SRC, sr = 48000;
+// WORKLET_FILE=<path to an EngineSound.ts> measures that version instead (for before / after comparisons)
+let override = null;
+if (process.env.WORKLET_FILE) { const t = (await import('node:fs')).readFileSync(process.env.WORKLET_FILE, 'utf8'); override = t.slice(t.indexOf('`') + 1, t.indexOf('`;')); }
+const res = await page.evaluate(async (override) => {
+  const src = override ?? window.__td.ENGINE_WORKLET_SRC, sr = 48000;
   const render = async (secs, script) => {
     const ctx = new OfflineAudioContext(2, sr * secs, sr);
     await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([src], { type: 'application/javascript' })));
@@ -49,7 +52,14 @@ const res = await page.evaluate(async () => {
   const sorted = [...env].sort((a, b) => a - b), floor = sorted[Math.floor(sorted.length * 0.5)];
   let pops = 0; for (let i = 1; i < env.length - 1; i++) if (env[i] > floor * 1.8 + 0.03 && env[i] >= env[i - 1] && env[i] > env[i + 1]) pops++;
   out.overrun = { pops, medianLevel: +floor.toFixed(3), maxLevel: +sorted[sorted.length - 1].toFixed(3) };
+  // up-shift at 7000 rpm under full load: loudness must dip, not drop out
+  const sh = await render(2, [[0.01, { ...base, gear: 2, rpm: 7000, load: 1 }], [1.0, { ...base, gear: 3, rpm: 5200, load: 1 }]]);
+  const rmsAt = (t0, t1) => { let s = 0, n = 0; for (let i = Math.floor(t0 * sr); i < t1 * sr; i++) { s += sh[i] * sh[i]; n++; } return Math.sqrt(s / n); };
+  const before = rmsAt(0.7, 0.98);
+  let worst = Infinity;
+  for (let t = 0.98; t < 1.3; t += 0.01) worst = Math.min(worst, rmsAt(t, t + 0.01));
+  out.upshift = { beforeRms: +before.toFixed(3), quietest10msRms: +worst.toFixed(3), dipDb: +(20 * Math.log10(worst / before)).toFixed(1) };
   return out;
-});
+}, override);
 for (const [k, v] of Object.entries(res)) console.log(k.padEnd(14), JSON.stringify(v));
 await browser.close();

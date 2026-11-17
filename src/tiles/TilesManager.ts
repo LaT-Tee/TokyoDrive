@@ -4,7 +4,7 @@
 // download / parse queues with explicit caps (CLAUDE.md §8, §9.5).
 import * as THREE from 'three';
 import { TilesRenderer } from '3d-tiles-renderer';
-import { GLTFExtensionsPlugin } from '3d-tiles-renderer/plugins';
+import { GLTFExtensionsPlugin, TilesFadePlugin } from '3d-tiles-renderer/plugins';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import { frame } from '../geo/geodesy';
@@ -17,7 +17,7 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 export interface ManifestTileset {
   id: string; cityCode: string; city: string;
-  type: 'bldg' | 'brid' | 'tran' | 'veg' | 'frn';
+  type: 'bldg' | 'bldgFar' | 'brid' | 'tran' | 'veg' | 'frn';
   lod: number; texture: boolean;
   /** Self-hosted URL relative to the data base, when downloaded. */
   url?: string;
@@ -133,11 +133,67 @@ function applyFacade(mat: THREE.MeshStandardMaterial): void {
   mat.customProgramCacheKey = () => 'td-facade';
 }
 
+/**
+ * Distance fade at the edge of what is loaded. Building materials dither themselves away
+ * over the last stretch before the load distance (by view depth, the same measure the
+ * culling camera's far plane uses), so the edge dissolves instead of cutting off.
+ * The far white-box layer (flight) uses the complementary threshold of the same noise:
+ * inside the band every pixel belongs to exactly one layer - no overlap, no holes.
+ */
+export const distanceFade = {
+  tdNearFade: { value: new THREE.Vector2(800, 1000) },   // detail layer: fade between x and y metres
+  tdFarFade: { value: new THREE.Vector2(8000, 9500) },   // far layer: its own outer edge
+};
+function addDistanceFade(mat: THREE.Material, far: boolean): void {
+  if ((mat as any).userData?.tdFade) return;
+  (mat as any).userData = { ...(mat as any).userData, tdFade: true };
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (shader, r) => {
+    prev?.call(mat, shader, r);
+    Object.assign(shader.uniforms, distanceFade);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying float tdViewDepth;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\n tdViewDepth = -mvPosition.z;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying float tdViewDepth; uniform vec2 tdNearFade; uniform vec2 tdFarFade;
+        float tdIGN(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }`)
+      .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+        {
+          float tdT = tdIGN(gl_FragCoord.xy);
+          float tdNearA = 1.0 - smoothstep(tdNearFade.x, tdNearFade.y, tdViewDepth);
+          ${far
+            ? 'if (tdT < tdNearA || tdT >= 1.0 - smoothstep(tdFarFade.x, tdFarFade.y, tdViewDepth)) discard;'
+            : 'if (tdT >= tdNearA) discard;'}
+        }`);
+  };
+  const key = mat.customProgramCacheKey.bind(mat);
+  mat.customProgramCacheKey = () => key() + (far ? '|tdfade-far' : '|tdfade');
+}
+
+/** PLATEAU materials ship with roughness 0 (mirror-like): make them matte; untextured ones get a facade. */
+function prepareMaterials(scene: THREE.Object3D, type: string): void {
+  scene.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
+      const s = mat as THREE.MeshStandardMaterial;
+      if ('roughness' in s) { s.roughness = 0.9; s.metalness = 0; }
+      if (!s.map && 'color' in s) {
+        if (type === 'bldg' || type === 'bldgFar') applyFacade(s);
+        else s.color.setRGB(0.34, 0.32, 0.3); // untextured: dim to balance against photo-textured tiles
+      }
+      addDistanceFade(s, type === 'bldgFar');
+    }
+  });
+}
+
 interface Entry {
   def: ManifestTileset;
   minX: number; maxX: number; minZ: number; maxZ: number;
   tiles: TilesRenderer | null;
   failed: boolean;
+  far: boolean; // LOD1 white-box layer for distant views from the air
 }
 
 export class TilesManager implements DeckProvider {
@@ -165,6 +221,13 @@ export class TilesManager implements DeckProvider {
   // the car must not depend on where the player happens to look.
   private nearCamera = new THREE.PerspectiveCamera();
   nearRange = 280;
+  // Far layer (flight only): LOD1 white boxes from the edge of the detail layer out to
+  // farDistance. Its camera's near plane starts inside the fade band, so tiles close to
+  // the aircraft - which the detail layer already covers - are never requested.
+  farEnabled = false;
+  farDistance = 8000;
+  farErrorTarget = 28;
+  private farCamera = new THREE.PerspectiveCamera();
   private lastUpdate = -1e9; private lastFull = -1e9; private idle = false;
   loadErrors = 0;
   /** Called for every loaded bridge mesh (for deck-coverage tests). */
@@ -188,7 +251,7 @@ export class TilesManager implements DeckProvider {
         frame.llaToLocal(la, lo, 0, p);
         minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
       }
-      this.entries.push({ def, minX, maxX, minZ, maxZ, tiles: null, failed: false });
+      this.entries.push({ def, minX, maxX, minZ, maxZ, tiles: null, failed: false, far: def.type === 'bldgFar' });
     }
   }
 
@@ -210,11 +273,23 @@ export class TilesManager implements DeckProvider {
     tiles.registerPlugin(new RetryFetchPlugin() as any);
     tiles.registerPlugin(new TextureLimitPlugin(this) as any);
     tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: this.draco, autoDispose: false } as any));
-    tiles.errorTarget = this.errorTarget;
-    tiles.setCamera(this.cullCamera);
-    tiles.setResolutionFromRenderer(this.cullCamera, this.renderer);
-    tiles.setCamera(this.nearCamera);
-    tiles.setResolutionFromRenderer(this.nearCamera, this.renderer);
+    // material fixes run in processTileModel, i.e. before 'load-model', where the fade plugin wraps them
+    tiles.registerPlugin({ name: 'TD_MATERIALS', processTileModel: (scene: THREE.Object3D) => prepareMaterials(scene, e.def.type) } as any);
+    // cross-fade between detail levels instead of popping (dithered, so no sorting issues)
+    tiles.registerPlugin(new TilesFadePlugin({ fadeDuration: 350, maximumFadeOutTiles: 80 }) as any);
+    tiles.errorTarget = e.far ? this.farErrorTarget : this.errorTarget;
+    // Tiles kept around the car by the near camera are in the scene but often behind the view:
+    // let three.js frustum-cull each mesh (the renderer disables that by default).
+    tiles.autoDisableRendererCulling = false;
+    if (e.far) {
+      tiles.setCamera(this.farCamera);
+      tiles.setResolutionFromRenderer(this.farCamera, this.renderer);
+    } else {
+      tiles.setCamera(this.cullCamera);
+      tiles.setResolutionFromRenderer(this.cullCamera, this.renderer);
+      tiles.setCamera(this.nearCamera);
+      tiles.setResolutionFromRenderer(this.nearCamera, this.renderer);
+    }
     const isBridge = e.def.type === 'brid';
     const world = new THREE.Matrix4();
     tiles.addEventListener('load-model', (ev: any) => {
@@ -224,21 +299,12 @@ export class TilesManager implements DeckProvider {
       scene.traverse((o) => {
         const m = o as THREE.Mesh;
         if (!m.isMesh) return;
+        if (e.far) { m.castShadow = false; m.receiveShadow = false; return; } // scenery only
         m.castShadow = true; m.receiveShadow = true;
-        // PLATEAU's intermediate tiles are heavily simplified stand-ins (blocky shapes,
-        // stretched textures, footprints that spill onto roads). Never show them and never
-        // let them into the collision grid: only the real leaf models count.
-        // PLATEAU materials ship with roughness 0 (mirror-like); make them matte
-        for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
-          const s = mat as THREE.MeshStandardMaterial;
-          if ('roughness' in s) { s.roughness = 0.9; s.metalness = 0; }
-          if (!s.map && 'color' in s) {
-            if (e.def.type === 'bldg') applyFacade(s);
-            else s.color.setRGB(0.34, 0.32, 0.3); // untextured: dim to balance against photo-textured tiles
-          }
-        }
-        // Hidden at street level; from the air (setCoarseVisible) they are the distant skyline.
-        if (coarse) { this.coarseMeshes.add(m); m.visible = this.coarseVisible; return; }
+        // PLATEAU's intermediate tiles are simplified stand-ins. The renderer only shows one
+        // while the real (leaf) models under it are still loading; hiding it left a hole that
+        // blinked in and out, so it is shown (and fades), but it never enters the collision grid.
+        if (coarse) { this.coarseMeshes.add(m); return; }
         // world matrix in the local frame (scene.matrix is the tile's ECEF transform)
         world.identity();
         let n: THREE.Object3D | null = m;
@@ -284,14 +350,6 @@ export class TilesManager implements DeckProvider {
   }
 
   private coarseMeshes = new Set<THREE.Mesh>();
-  private coarseVisible = false;
-  /** Show PLATEAU's simplified intermediate tiles (only sensible well above the rooftops). */
-  setCoarseVisible(v: boolean): void {
-    if (v === this.coarseVisible) return;
-    this.coarseVisible = v;
-    for (const m of this.coarseMeshes) m.visible = v;
-    this.version++;
-  }
 
   /** Drop every loaded tileset so tiles reload with the current texture / detail settings. */
   reload(): void {
@@ -307,7 +365,7 @@ export class TilesManager implements DeckProvider {
 
   setErrorTarget(v: number): void {
     this.errorTarget = v;
-    for (const e of this.entries) if (e.tiles) e.tiles.errorTarget = v;
+    for (const e of this.entries) if (e.tiles && !e.far) e.tiles.errorTarget = v;
   }
 
   /** Call once per frame (after the camera has been updated). */
@@ -319,9 +377,9 @@ export class TilesManager implements DeckProvider {
         const dx = Math.max(e.minX - x, 0, x - e.maxX), dz = Math.max(e.minZ - z, 0, z - e.maxZ);
         const d = Math.hypot(dx, dz);
         // vegetation / street furniture are small-scale detail: only close to the car
-        const r = e.def.type === 'veg' || e.def.type === 'frn' ? Math.min(range, 450) : range;
+        const r = e.far ? (this.farEnabled ? this.farDistance : -1) : e.def.type === 'veg' || e.def.type === 'frn' ? Math.min(range, 450) : range;
         if (!e.tiles && !e.failed && d < r) this.activate(e);
-        else if (e.tiles && d > r * 1.5 + 300) this.deactivate(e);
+        else if (e.tiles && (r < 0 || d > r * 1.3 + 500)) this.deactivate(e);
       }
     }
     // tile selection is CPU work per tileset: 20 Hz is plenty at driving speeds
@@ -339,6 +397,16 @@ export class TilesManager implements DeckProvider {
     c.fov = Math.min(110, g.fov + 14); c.aspect = g.aspect; c.near = g.near; c.far = this.loadDistance;
     c.updateProjectionMatrix();
     c.matrixWorld.copy(g.matrixWorld); c.matrixWorldInverse.copy(g.matrixWorldInverse);
+    // the fade band sits just inside the culling far plane
+    const L = this.loadDistance;
+    distanceFade.tdNearFade.value.set(L * 0.78, L * 0.97);
+    if (this.farEnabled) {
+      const f = this.farCamera, F = this.farDistance;
+      f.fov = c.fov; f.aspect = c.aspect; f.near = L * 0.72; f.far = F;
+      f.updateProjectionMatrix();
+      f.matrixWorld.copy(g.matrixWorld); f.matrixWorldInverse.copy(g.matrixWorldInverse);
+      distanceFade.tdFarFade.value.set(F * 0.8, F * 0.97);
+    } else distanceFade.tdNearFade.value.set(L * 0.78, L * 0.97);
     const nc = this.nearCamera, H = 420;
     nc.fov = (2 * Math.atan(this.nearRange / H) * 180) / Math.PI; nc.aspect = 1; nc.near = 10; nc.far = H + 400;
     nc.updateProjectionMatrix();
@@ -347,8 +415,8 @@ export class TilesManager implements DeckProvider {
     for (const e of this.entries) {
       if (!e.tiles) continue;
       try {
-        e.tiles.setResolutionFromRenderer(nc, this.renderer);
-        e.tiles.setResolutionFromRenderer(c, this.renderer);
+        if (e.far) e.tiles.setResolutionFromRenderer(this.farCamera, this.renderer);
+        else { e.tiles.setResolutionFromRenderer(nc, this.renderer); e.tiles.setResolutionFromRenderer(c, this.renderer); }
         e.tiles.update();
       } catch (err) {
         // a broken tileset must never freeze the frame loop

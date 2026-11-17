@@ -2,7 +2,7 @@
  "mode": "roads",
  "base": "http://localhost:5173",
  "quality": "balanced",
- "date": "2026-11-15T23:36:31.587Z",
+ "date": "2026-11-17T13:19:19.699Z",
  "results": {
   "roads-shinjuku-continuous": {
    "pass": true,
@@ -13,16 +13,16 @@
   "roads-shinjuku-markings-sharp-10-30m": {
    "pass": true,
    "sharpRowFraction": 1,
-   "maxStep": 182,
+   "maxStep": 181,
    "rows": [
-    308,
-    351
+    316,
+    353
    ]
   },
   "roads-shinjuku-no-flicker-30s": {
    "pass": true,
    "worstChangedFraction": 0,
-   "frames": 29,
+   "frames": 30,
    "settle": {
     "waitedMs": 1,
     "pending": 0,
@@ -40,8 +40,8 @@
    "sharpRowFraction": 1,
    "maxStep": 150,
    "rows": [
-    306,
-    347
+    314,
+    350
    ]
   },
   "roads-fuchu-no-flicker-30s": {
