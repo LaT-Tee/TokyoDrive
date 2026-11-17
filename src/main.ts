@@ -11,6 +11,7 @@ import { TUNNEL_H, Tunnels } from './tunnels/Tunnels';
 import { ROAD_LIFT, RoadSurface } from './roads/RoadSurface';
 import { TilesManager, type Manifest } from './tiles/TilesManager';
 import { GoogleFill } from './tiles/GoogleFill';
+import { FacadeBaker } from './tiles/FacadeBaker';
 import { CarController, type CarInput } from './car/CarController';
 import { BODY_COLORS, CARS, VEHICLES, CarVisual, initCarLoaders } from './car/garage';
 import { AircraftController, AircraftVisual, AIR_SPAWN_AGL, type AirInput } from './air/Aircraft';
@@ -72,6 +73,9 @@ async function boot(): Promise<void> {
   ground.tunnels = tunnels;
   ground.onRoad = (x, z) => { const r = roads.nearest(x, z, 12); return !!r && r.dist <= r.width / 2 - 0.3; };
   const googleFill = new GoogleFill(camera, renderer); // colour source only: never added to the scene
+  const facadeBaker = new FacadeBaker(renderer, googleFill);
+  tiles.onFacadeMesh = (m, w) => facadeBaker.add(m, w);
+  tiles.onFacadeMeshGone = (m) => facadeBaker.remove(m);
   const readToken = () => { try { return localStorage.getItem('td.googleToken') ?? ''; } catch { return ''; } };
   const googleToken = readToken() || (import.meta.env.VITE_CESIUM_ION_TOKEN as string | undefined) || (import.meta.env.VITE_GOOGLE_MAPS_KEY as string | undefined) || '';
   const sky = new Sky(renderer, scene, camera);
@@ -412,12 +416,12 @@ async function boot(): Promise<void> {
 
     updateCamera(dt, now);
     tiles.update(car.x, car.z, now);
-    googleFill.update();
+    googleFill.update(car.x, car.z);
+    facadeBaker.update(car.x, car.z, 3); // a few ms per frame photographing walls
     obstacles.update(2.5);
     groundUniforms.tdTime.value = now / 1000;
     focus.set(car.x, car.y, car.z);
     sky.update(focus);
-    googleFill.render();
     sky.render(dt);
     if (grabs.length) { const gl = renderer.getContext(); const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight; const px = new Uint8Array(w * h * 4); gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px); for (const g of grabs.splice(0)) g({ w, h, px }); }
 
@@ -438,7 +442,7 @@ async function boot(): Promise<void> {
 
   // ---- debug / test hooks (used by scripts/headless-check.mjs)
   (window as any).__td = {
-    THREE, car, airc, sound, googleFill, ENGINE_WORKLET_SRC, get flying() { return flying(); }, get crashes() { return crashes; }, AIR_SPAWN_AGL,
+    THREE, car, airc, sound, googleFill, facadeBaker, ENGINE_WORKLET_SRC, get flying() { return flying(); }, get crashes() { return crashes; }, AIR_SPAWN_AGL,
     ground, terrain, tiles, obstacles, roads, decks, tunnels, roadSurface, vegetation, sky, camera, renderer, fps, frame, look, map,
     get settled() { return settled; }, get playing() { return playing; }, get inTunnel() { return inTunnel; },
     teleport, recover,

@@ -8,7 +8,7 @@ import { GLTFExtensionsPlugin, TilesFadePlugin } from '3d-tiles-renderer/plugins
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import { frame } from '../geo/geodesy';
-import { googleTexUniforms, GOOGLE_FACADE_GLSL } from './GoogleFill';
+import { facadeUniforms } from './FacadeBaker';
 import type { HeightGrid } from '../world/HeightGrid';
 import type { DeckProvider } from '../world/Ground';
 
@@ -104,12 +104,12 @@ class TextureLimitPlugin {
 function applyFacade(mat: THREE.MeshStandardMaterial): void {
   mat.color.setRGB(1, 1, 1);
   mat.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, googleTexUniforms);
+    Object.assign(shader.uniforms, facadeUniforms(mat)); // per building group: its baked Google atlas
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float _batchid;\nvarying vec3 tdWP; varying vec3 tdWN; varying float tdSeed;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\n tdWP = (modelMatrix * vec4(position, 1.0)).xyz; tdWN = normalize(mat3(modelMatrix) * normal);\n tdSeed = fract(sin(_batchid * 12.9898 + modelMatrix[3].x * 0.0137 + modelMatrix[3].z * 0.0071) * 43758.5453);');
+      .replace('#include <common>', '#include <common>\nattribute float _batchid;\nattribute vec2 gUv;\nvarying vec3 tdWP; varying vec3 tdWN; varying float tdSeed; varying vec2 tdGUv;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n tdGUv = gUv; tdWP = (modelMatrix * vec4(position, 1.0)).xyz; tdWN = normalize(mat3(modelMatrix) * normal);\n tdSeed = fract(sin(_batchid * 12.9898 + modelMatrix[3].x * 0.0137 + modelMatrix[3].z * 0.0071) * 43758.5453);');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 tdWP; varying vec3 tdWN; varying float tdSeed;\nuniform float tdGOn; uniform sampler2D tdGColor; uniform sampler2D tdGDepth; uniform vec2 tdGRes; uniform vec2 tdGNearFar; uniform float tdGRange;\nfloat tdHash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }')
+      .replace('#include <common>', '#include <common>\nvarying vec3 tdWP; varying vec3 tdWN; varying float tdSeed;\nvarying vec2 tdGUv; uniform sampler2D tdGAtlas; uniform float tdGBaked;\nfloat tdHash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }')
       .replace('#include <color_fragment>', `#include <color_fragment>
         {
           vec3 n = normalize(tdWN);
@@ -130,7 +130,11 @@ function applyFacade(mat: THREE.MeshStandardMaterial): void {
           } else {
             diffuseColor.rgb = wall * 0.8;                     // roofs
           }
-          ${GOOGLE_FACADE_GLSL}
+          // Google colours baked onto this wall (FacadeBaker); alpha = the scan had a surface there
+          if (tdGBaked > 0.5 && tdGUv.x >= 0.0) {
+            vec4 gc = texture2D(tdGAtlas, tdGUv);
+            diffuseColor.rgb = mix(diffuseColor.rgb, gc.rgb, smoothstep(0.25, 0.75, gc.a));
+          }
         }`);
   };
   mat.customProgramCacheKey = () => 'td-facade';
@@ -233,6 +237,9 @@ export class TilesManager implements DeckProvider {
   private farCamera = new THREE.PerspectiveCamera();
   private lastUpdate = -1e9; private lastFull = -1e9; private idle = false;
   loadErrors = 0;
+  /** Untextured leaf building meshes appear / disappear (Google facade baking). */
+  onFacadeMesh: ((mesh: THREE.Mesh, world: THREE.Matrix4) => void) | null = null;
+  onFacadeMeshGone: ((mesh: THREE.Mesh) => void) | null = null;
   /** Called for every loaded bridge mesh (for deck-coverage tests). */
   onBridgeLoaded: (() => void) | null = null;
 
@@ -318,6 +325,7 @@ export class TilesManager implements DeckProvider {
           this.deckMeshes.set(m, scene);
         } else if (e.def.type === 'bldg') {
           this.obstacles.addMesh(m.geometry, world);
+          if (!(m.material as THREE.MeshStandardMaterial).map) this.onFacadeMesh?.(m, world);
         }
       });
       if (isBridge) this.onBridgeLoaded?.();
@@ -327,7 +335,7 @@ export class TilesManager implements DeckProvider {
     tiles.addEventListener('dispose-model', (ev: any) => {
       (ev.scene as THREE.Object3D).traverse((o) => {
         const m = o as THREE.Mesh;
-        if (m.isMesh) this.coarseMeshes.delete(m);
+        if (m.isMesh) { this.coarseMeshes.delete(m); this.onFacadeMeshGone?.(m); }
         if (m.isMesh && this.deckMeshes.delete(m)) (m.geometry as any).disposeBoundsTree?.();
       });
     });
