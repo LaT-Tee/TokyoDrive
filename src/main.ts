@@ -19,6 +19,7 @@ import { EngineSound, ENGINE_WORKLET_SRC } from './audio/EngineSound';
 import { Sky } from './sky/Sky';
 import { Ui } from './ui/ui';
 import { MapView } from './ui/MapView';
+import { Minimap } from './ui/Minimap';
 import { cityName, t as tr } from './i18n'; // `t` is the terrain config below
 
 const params = new URLSearchParams(location.search);
@@ -209,6 +210,8 @@ async function boot(): Promise<void> {
     onClose: () => map.show(false),
   });
   document.getElementById('ui')!.append(map.el);
+  const minimap = new Minimap();
+  ui.mountHud(minimap.el);
   applyQuality(quality);
   teleport(spawn.lat, spawn.lon, spawn.heading);
 
@@ -429,6 +432,13 @@ async function boot(): Promise<void> {
     if (frameNo % 15 === 0) {
       ui.setGoogleStatus(googleFill.status === 'error' ? tr('google.error', { msg: googleFill.message }) : tr(`google.${googleFill.status}`));
       ui.setCredits(googleFill.credits);
+    }
+    if (playing) {
+      // zoomed-in minimap: street detail on the ground, wider the higher the aircraft
+      const ll = frame.localToLla(car.x, car.y, car.z);
+      const agl = flying() ? Math.max(0, car.y - terrain.heightAt(car.x, car.z)) : 0;
+      const zoom = flying() ? Math.max(12, 16.2 - Math.log2(1 + agl / 120)) : 16.8 - Math.min(1.2, Math.abs(car.speed) / 40);
+      minimap.update(ll.lat, ll.lon, car.heading, zoom, now);
     }
     if (playing && frameNo % 6 === 0) {
       const pending = tiles.pending + terrain.pendingChunks;

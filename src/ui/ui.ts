@@ -143,6 +143,9 @@ export class Ui {
     g.scrollTop = scroll;
   }
 
+  /** Add a widget to the driving HUD (hidden together with it while the garage is open). */
+  mountHud(node: HTMLElement): void { this.hud.append(node); }
+
   setGoogleStatus(text: string): void { if (this.googleStatus.textContent !== text) this.googleStatus.textContent = text; }
   setCredits(text: string): void { if (this.credits.textContent !== text) this.credits.textContent = text; }
 
