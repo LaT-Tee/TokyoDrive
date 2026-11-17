@@ -70,6 +70,16 @@ export class GoogleFill {
     const tiles = new TilesRenderer(google ? GOOGLE_ROOT : undefined);
     if (google) tiles.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: token, autoRefreshToken: true }) as any);
     else tiles.registerPlugin(new CesiumIonAuthPlugin({ apiToken: token, assetId: String(GOOGLE_ION_ASSET), autoRefreshToken: true }) as any);
+    this.attach(tiles);
+  }
+
+  /** Test hook: use any keyless 3D Tiles tileset as the colour source (exercises the same path). */
+  debugUseTileset(url: string): void {
+    this.disable();
+    this.attach(new TilesRenderer(url));
+  }
+
+  private attach(tiles: TilesRenderer): void {
     tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: this.draco, autoDispose: false } as any));
     tiles.registerPlugin({
       name: 'TD_GOOGLE_SOURCE',
@@ -96,6 +106,10 @@ export class GoogleFill {
       this.disable(true);
     });
     this.holder.add(tiles.group);
+    // This scene is never part of the main render, so nothing updates its world matrices for
+    // us: without this the tiles sit at raw ECEF coordinates, fail every frustum test and are
+    // never requested (the layer stayed at "loading" forever).
+    this.scene.updateMatrixWorld(true);
     this.tiles = tiles;
     this.status = 'loading';
   }
@@ -129,6 +143,7 @@ export class GoogleFill {
     c.fov = g.fov; c.aspect = g.aspect; c.near = g.near; c.far = this.range;
     c.updateProjectionMatrix();
     c.matrixWorld.copy(g.matrixWorld); c.matrixWorldInverse.copy(g.matrixWorldInverse);
+    this.scene.updateMatrixWorld();
     try { this.tiles.setResolutionFromRenderer(c, this.renderer); this.tiles.update(); }
     catch (e) { this.status = 'error'; this.message = String(e); this.disable(true); }
   }
