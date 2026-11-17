@@ -490,5 +490,32 @@ export class TilesManager implements DeckProvider {
     return best;
   }
 
+  /**
+   * Every bridge-model surface under (x, z) within `far` below `y`, top first. Hits closer
+   * than 3 m are one deck (its thickness, a parapet), so stacked decks come out once each.
+   */
+  castAll(x: number, y: number, z: number, far: number): number[] {
+    const rc = this.raycaster as THREE.Raycaster & { firstHitOnly?: boolean };
+    rc.ray.origin.set(x, y, z); rc.ray.direction.copy(this.down); rc.near = 0; rc.far = far;
+    rc.firstHitOnly = false;
+    const ys: number[] = [], hits: THREE.Intersection[] = [];
+    for (const [m, scene] of this.deckMeshes) {
+      if (!scene.parent) continue;
+      const bs = m.geometry.boundingSphere;
+      if (bs) {
+        const e = m.matrixWorld.elements;
+        if (Math.abs(e[12] - x) > bs.radius + bs.center.length() || Math.abs(e[14] - z) > bs.radius + bs.center.length()) continue;
+      }
+      hits.length = 0;
+      m.raycast(rc, hits);
+      for (const h of hits) ys.push(h.point.y);
+    }
+    rc.firstHitOnly = true;
+    ys.sort((a, b) => b - a);
+    const out: number[] = [];
+    for (const v of ys) if (!out.length || out[out.length - 1] - v > 3) out.push(v);
+    return out;
+  }
+
   get bridgeMeshCount(): number { return this.deckMeshes.size; }
 }

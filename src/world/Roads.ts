@@ -11,7 +11,7 @@ export interface Way {
 }
 interface RawWay { i: number; c: number; n?: string; b?: 1; t?: 1; l?: number; o?: 1; ln?: number; w: number; p: number[] }
 
-export interface NearestRoad { x: number; z: number; heading: number; bridge: boolean; name: string; dist: number; width: number }
+export interface NearestRoad { id: number; x: number; z: number; heading: number; bridge: boolean; name: string; dist: number; width: number }
 
 const REF_H = 60; // nominal ellipsoidal ground height used when projecting OSM nodes
 
@@ -103,7 +103,7 @@ export class Roads {
         if (len2 < 1e-6) continue;
         const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / len2));
         const px = ax + dx * t, pz = az + dz * t, d = Math.hypot(px - x, pz - z);
-        if (d < bd) { bd = d; best = { x: px, z: pz, heading: Math.atan2(dx, -dz), bridge: w.bridge, name: w.name, dist: d, width: w.width }; }
+        if (d < bd) { bd = d; best = { id: w.id, x: px, z: pz, heading: Math.atan2(dx, -dz), bridge: w.bridge, name: w.name, dist: d, width: w.width }; }
       }
     }
     return best;

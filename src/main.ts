@@ -154,8 +154,8 @@ async function boot(): Promise<void> {
     const r = roads.nearest(car.x, car.z, 400, maxCls);
     if (r) {
       const g = terrain.heightAt(r.x, r.z, car.y);
-      // on a bridge, land on the deck (procedural or real PLATEAU model), not on the ground below it
-      const y = r.bridge ? Math.max(g, decks.deckHeight(r.x, r.z, 1e9), tiles.castDown(r.x, g + 150, r.z, 151)) : ground.surface(r.x, r.z, g + 1);
+      // on a bridge or a lifted approach, land on the deck (procedural or real PLATEAU model), not on the ground below it
+      const y = r.bridge || decks.profile(r.id) ? Math.max(g, decks.deckHeight(r.x, r.z, 1e9), tiles.castDown(r.x, g + 150, r.z, 151)) : ground.surface(r.x, r.z, g + 1);
       car.x = r.x; car.z = r.z; car.heading = r.heading; car.course = r.heading; car.speed = 0; car.vy = 0; car.y = y;
       return;
     }

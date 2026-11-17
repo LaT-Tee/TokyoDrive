@@ -79,8 +79,13 @@ export class RoadSurface {
     const now = performance.now();
     if (this.decksVersion !== this.decks.version && now - this.lastDeckCheck > 1500) {
       this.decksVersion = this.decks.version; this.lastDeckCheck = now;
-      for (const id of [...this.dense.keys()]) if (this.roads.ways.get(id)?.bridge) this.dense.delete(id);
-      for (const [key, c] of this.cells) if (c.missingBridge) { this.disposeCell(c); this.cells.delete(key); }
+      for (const id of [...this.dense.keys()]) if (this.roads.ways.get(id)?.bridge || this.decks.isRamp(id)) this.dense.delete(id);
+      // cells where a deck appeared, changed or went away are paved again
+      const boxes = this.decks.takeDirty();
+      for (const [key, c] of this.cells) {
+        const [kx, kz] = key.split(',').map(Number), x0 = kx * CELL, z0 = kz * CELL;
+        if (c.missingBridge || boxes.some((b) => b[0] < x0 + CELL && b[2] > x0 && b[1] < z0 + CELL && b[3] > z0)) { this.disposeCell(c); this.cells.delete(key); }
+      }
     }
     const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL), R = Math.ceil(BUILD_RANGE / CELL);
     for (const [key, c] of this.cells) {
@@ -126,10 +131,9 @@ export class RoadSurface {
     if (this.dense.has(w.id)) return this.dense.get(w.id)!;
     let deckYs: Float64Array | null = null;
     let onModel = false; // a real PLATEAU bridge: heights come from raycasts on its mesh
-    if (w.bridge) {
-      deckYs = this.decks.profile(w.id);
-      if (!deckYs) { if (this.decks.isCoveredWay(w.id)) onModel = true; else return null; } // deck not built yet (not cached: retry)
-    }
+    // a bridge, or an expressway approach lifted to meet one: follow the solved deck heights
+    deckYs = this.decks.profile(w.id);
+    if (w.bridge && !deckYs) { if (this.decks.isCoveredWay(w.id)) onModel = true; else return null; } // deck not built yet (not cached: retry)
     const xs: number[] = [], zs: number[] = [], ss: number[] = [], ys: number[] = [];
     const nodeS: number[] = [];
     let s = 0;
@@ -167,10 +171,22 @@ export class RoadSurface {
       d.rx[i] = -dz; d.rz[i] = dx;
       if (deckYs) { d.yL[i] = d.yC[i] = d.yR[i] = ys[i] + 0.03; continue; }
       if (onModel) {
+        // where decks are stacked, follow this way's own deck (nearest to the previous sample /
+        // the measured node height), not whichever deck happens to be on top
         const g = this.terrain.heightAt(xs[i], zs[i]);
-        d.yC[i] = this.tiles.castDown(xs[i], g + 160, zs[i], 161.5);
-        d.yL[i] = this.tiles.castDown(xs[i] - d.rx[i] * hw * 0.8, g + 160, zs[i] - d.rz[i] * hw * 0.8, 161.5);
-        d.yR[i] = this.tiles.castDown(xs[i] + d.rx[i] * hw * 0.8, g + 160, zs[i] + d.rz[i] * hw * 0.8, 161.5);
+        const near = (x: number, z: number, expect: number) => {
+          const hs = this.tiles.castAll(x, g + 160, z, 161.5);
+          if (!hs.length) return -Infinity;
+          if (expect !== expect) return hs[0];
+          let b = hs[0];
+          for (const v of hs) if (Math.abs(v - expect) < Math.abs(b - expect)) b = v;
+          return b;
+        };
+        const prev = i > 0 && d.yC[i - 1] > -1e8 ? d.yC[i - 1] : this.decks.nodeHeight(w.keys[0]);
+        d.yC[i] = near(xs[i], zs[i], prev);
+        const c = d.yC[i] > -1e8 ? d.yC[i] : prev;
+        d.yL[i] = near(xs[i] - d.rx[i] * hw * 0.8, zs[i] - d.rz[i] * hw * 0.8, c);
+        d.yR[i] = near(xs[i] + d.rx[i] * hw * 0.8, zs[i] + d.rz[i] * hw * 0.8, c);
         continue;
       }
       const lx = xs[i] - d.rx[i] * hw, lz = zs[i] - d.rz[i] * hw, rx2 = xs[i] + d.rx[i] * hw, rz2 = zs[i] + d.rz[i] * hw;
