@@ -86,6 +86,35 @@ export function initCarLoaders(renderer: THREE.WebGLRenderer): void {
 
 const WHEEL_HERO = /^Wheel(Front|Rear)(L|R)$/;
 
+/** Direction in which a wheel's geometry is thinnest (its axle), in the car frame. */
+function geometricAxle(wheel: THREE.Object3D): THREE.Vector3 | null {
+  const pts: THREE.Vector3[] = [], p = new THREE.Vector3();
+  wheel.updateMatrixWorld(true);
+  wheel.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    const pos = m.geometry.getAttribute('position');
+    for (let i = 0; i < pos.count; i += 3) pts.push(p.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld).clone());
+  });
+  if (pts.length < 12) return null;
+  const c = pts.reduce((s, q) => s.add(q), new THREE.Vector3()).multiplyScalar(1 / pts.length);
+  const C = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  for (const q of pts) { const d = [q.x - c.x, q.y - c.y, q.z - c.z]; for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) C[i][j] += d[i] * d[j]; }
+  // Jacobi eigen-decomposition of the 3x3 covariance; the smallest eigenvalue's vector is the axle
+  const V = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  for (let sweep = 0; sweep < 50; sweep++) {
+    let pi = 0, qi = 1;
+    for (const [i, j] of [[0, 1], [0, 2], [1, 2]]) if (Math.abs(C[i][j]) > Math.abs(C[pi][qi])) { pi = i; qi = j; }
+    if (Math.abs(C[pi][qi]) < 1e-12) break;
+    const th = 0.5 * Math.atan2(2 * C[pi][qi], C[qi][qi] - C[pi][pi]), cs = Math.cos(th), sn = Math.sin(th);
+    for (let k = 0; k < 3; k++) { const a = C[k][pi], b = C[k][qi]; C[k][pi] = cs * a - sn * b; C[k][qi] = sn * a + cs * b; }
+    for (let k = 0; k < 3; k++) { const a = C[pi][k], b = C[qi][k]; C[pi][k] = cs * a - sn * b; C[qi][k] = sn * a + cs * b; }
+    for (let k = 0; k < 3; k++) { const a = V[k][pi], b = V[k][qi]; V[k][pi] = cs * a - sn * b; V[k][qi] = sn * a + cs * b; }
+  }
+  const ev = [C[0][0], C[1][1], C[2][2]], i = ev.indexOf(Math.min(...ev));
+  return new THREE.Vector3(V[0][i], V[1][i], V[2][i]).normalize();
+}
+
 export class CarVisual {
   readonly root = new THREE.Group();      // positioned / oriented by the game
   private model: THREE.Group | null = null;
@@ -181,8 +210,25 @@ export class CarVisual {
     const k = spec.length / Math.max(0.1, box.max.z - box.min.z);
     holder.scale.multiplyScalar(k);
     holder.position.set(-c.x * k, -box.min.y * k, -c.z * k);
-    // express the car's up (+Y) and axle (+X) directions in every wheel pivot's local frame
     holder.updateMatrixWorld(true);
+    // The asset is posed with its front wheels already steered (~31 degrees). Find each wheel's
+    // real axle from its geometry (the direction in which the wheel is thinnest) and turn the
+    // wheel straight, so rolling happens about its own axle instead of wobbling.
+    for (const w of this.wheels) {
+      const axle = geometricAxle(w.node);
+      if (!axle) continue;
+      const target = new THREE.Vector3(Math.sign(axle.x) || 1, 0, 0);
+      if (axle.angleTo(target) < 0.005) continue;
+      const pivotQ = new THREE.Quaternion(); w.node.getWorldQuaternion(pivotQ); // car frame (model not attached yet)
+      const fix = new THREE.Quaternion().setFromUnitVectors(axle, target);
+      const local = pivotQ.clone().invert().multiply(fix).multiply(pivotQ);   // the same turn in the pivot's frame
+      const straight = new THREE.Group(); straight.name = w.node.name + 'Straight';
+      for (const ch of [...w.node.children]) straight.add(ch);
+      straight.quaternion.copy(local);
+      w.node.add(straight);
+    }
+    holder.updateMatrixWorld(true);
+    // express the car's up (+Y) and axle (+X) directions in every wheel pivot's local frame
     const toPivot = new THREE.Matrix4(), rel = new THREE.Quaternion();
     for (const w of this.wheels) {
       // the model is not attached to the car root yet, so its world matrices are relative to the car
