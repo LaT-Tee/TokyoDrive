@@ -8,3 +8,4 @@ CLAUDE.md
 CLAUDE-*.md
 .claude/
 data.partial-*/
+/screenshots/
