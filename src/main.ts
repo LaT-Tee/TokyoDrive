@@ -71,8 +71,7 @@ async function boot(): Promise<void> {
   ground.decks.push(tiles, decks);
   ground.tunnels = tunnels;
   ground.onRoad = (x, z) => { const r = roads.nearest(x, z, 12); return !!r && r.dist <= r.width / 2 - 0.3; };
-  const googleFill = new GoogleFill(camera, renderer, terrain, obstacles, roads);
-  scene.add(googleFill.group);
+  const googleFill = new GoogleFill(camera, renderer); // colour source only: never added to the scene
   const readToken = () => { try { return localStorage.getItem('td.googleToken') ?? ''; } catch { return ''; } };
   const googleToken = readToken() || (import.meta.env.VITE_CESIUM_ION_TOKEN as string | undefined) || (import.meta.env.VITE_GOOGLE_MAPS_KEY as string | undefined) || '';
   const sky = new Sky(renderer, scene, camera);
@@ -363,8 +362,7 @@ async function boot(): Promise<void> {
       terrain.update(car.x, car.z, QUALITY[quality].terrainRadius, car.y);
       roads.update(car.x, car.z); decks.update(car.x, car.z); tunnels.update(car.x, car.z);
       roadSurface.update(car.x, car.z);
-      // Google's photogrammetry already has the real trees: do not add procedural ones on top
-      vegetation.enabled = quality !== 'performance' && googleFill.status !== 'on';
+      vegetation.enabled = quality !== 'performance';
       vegetation.update(car.x, car.z);
     }
 
@@ -407,18 +405,19 @@ async function boot(): Promise<void> {
     airVisual.root.visible = flying() && !firstPerson;
     airVisual.root.position.set(car.x, car.y, car.z);
     airVisual.root.rotation.set(car.pitch, -car.heading, -car.roll, 'YXZ');
-    airVisual.animate(airc);
+    airVisual.animate(airc as any, dt);
     ui.setCockpit(playing && camMode === 2 && !flying(), car.steer);
     if (flying()) sound.update(spec.engine, airc.rpm, airc.load, Math.abs(airc.speed), playing && !map.open && !airc.crashed);
     else sound.update(spec.engine, car.rpm, car.throttle, Math.abs(car.speed), playing && !map.open, car.gear);
 
     updateCamera(dt, now);
     tiles.update(car.x, car.z, now);
-    googleFill.update(car.x, car.z);
+    googleFill.update();
     obstacles.update(2.5);
     groundUniforms.tdTime.value = now / 1000;
     focus.set(car.x, car.y, car.z);
     sky.update(focus);
+    googleFill.render();
     sky.render(dt);
     if (grabs.length) { const gl = renderer.getContext(); const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight; const px = new Uint8Array(w * h * 4); gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px); for (const g of grabs.splice(0)) g({ w, h, px }); }
 
@@ -439,7 +438,7 @@ async function boot(): Promise<void> {
 
   // ---- debug / test hooks (used by scripts/headless-check.mjs)
   (window as any).__td = {
-    car, airc, sound, googleFill, ENGINE_WORKLET_SRC, get flying() { return flying(); }, get crashes() { return crashes; }, AIR_SPAWN_AGL,
+    THREE, car, airc, sound, googleFill, ENGINE_WORKLET_SRC, get flying() { return flying(); }, get crashes() { return crashes; }, AIR_SPAWN_AGL,
     ground, terrain, tiles, obstacles, roads, decks, tunnels, roadSurface, vegetation, sky, camera, renderer, fps, frame, look, map,
     get settled() { return settled; }, get playing() { return playing; }, get inTunnel() { return inTunnel; },
     teleport, recover,

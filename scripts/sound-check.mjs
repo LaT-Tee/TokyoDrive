@@ -58,6 +58,12 @@ const res = await page.evaluate(async (override) => {
   const before = rmsAt(0.7, 0.98);
   let worst = Infinity;
   for (let t = 0.98; t < 1.3; t += 0.01) worst = Math.min(worst, rmsAt(t, t + 0.01));
+  // lift-off at 7000 rpm: how long until the level has halved (a cut-off sounds wrong; ~0.3-0.6 s is natural)
+  const lo = await render(3, [[0.01, { ...base, rpm: 7000, load: 1 }], [1.5, { ...base, rpm: 6600, load: 0 }]]);
+  const rmsLo = (t0, t1) => { let s = 0, n = 0; for (let i = Math.floor(t0 * sr); i < t1 * sr; i++) { s += lo[i] * lo[i]; n++; } return Math.sqrt(s / n); };
+  const ref = rmsLo(1.2, 1.48); let half = null;
+  for (let t = 1.5; t < 2.9; t += 0.01) if (rmsLo(t, t + 0.02) < ref * 0.5) { half = Math.round((t - 1.5) * 1000); break; }
+  out.liftoff = { msToHalfLevel: half };
   out.upshift = { beforeRms: +before.toFixed(3), quietest10msRms: +worst.toFixed(3), dipDb: +(20 * Math.log10(worst / before)).toFixed(1) };
   return out;
 }, override);

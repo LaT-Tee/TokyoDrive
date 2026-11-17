@@ -53,7 +53,8 @@ class TdEngine extends AudioWorkletProcessor {
     const bank = v8 ? [0, 1, 1, 0, 1, 0, 0, 1] : cyl === 6 ? [0, 1, 0, 1, 0, 1] : [0, 1, 1, 0];
     for (let i = 0; i < L.length; i++) {
       this.rpm += (p.rpm - this.rpm) * 0.0009;
-      this.load += (p.load - this.load) * 0.0014;
+      // throttle in: immediate; throttle off: the roar dies away over ~0.4 s instead of cutting out
+      this.load += (p.load - this.load) * (p.load > this.load ? 0.0014 : 0.00005);
       this.gain += ((p.on ? 1 : 0) - this.gain) * 0.0004;
       const rev = Math.min(1, this.rpm / p.redline);
       if (this.cut > 0) this.cut -= dt;
@@ -61,7 +62,7 @@ class TdEngine extends AudioWorkletProcessor {
       // During a shift the throttle is only partly lifted; ramp in and out over a few ms
       // so the pulses thin out and the pitch falls instead of the sound dropping out.
       const tqTarget = this.cut > 0 ? this.load * 0.4 : this.load;
-      this.tq += (tqTarget - this.tq) * (tqTarget < this.tq ? 0.004 : 0.0025);
+      this.tq += (tqTarget - this.tq) * (tqTarget < this.tq ? 0.00007 : 0.0025);
       const torque = this.tq;
 
       // --- firing: one pressure pulse per cylinder per engine cycle
@@ -122,7 +123,7 @@ class TdEngine extends AudioWorkletProcessor {
         // throttle, quiet when coasting so the pops stand clear of it
         this.env[b] += (ac * ac - this.env[b]) * 0.00008;
         // loudness target follows the throttle slowly (~120 ms), so a shift dips it only a little
-        if (b === 0) this.want += ((0.07 + 0.3 * this.load + 0.06 * rev) - this.want) * 0.00018;
+        if (b === 0) { const w = 0.07 + 0.3 * this.load + 0.06 * rev; this.want += (w - this.want) * (w > this.want ? 0.00018 : 0.00004); }
         const want = this.want;
         const agc = Math.min(4, want / Math.max(0.02, Math.sqrt(this.env[b])));
         const s = Math.tanh((ac * agc + pops * 0.9) * drive);
@@ -241,6 +242,22 @@ export class EngineSound {
       this.windGain.gain.setTargetAtTime(Math.min(0.25, speed * 0.0035), t, 0.2);
       return;
     }
+    if (e.tone === 'jet') {
+      // turbofan: rpm = N1 %. Fan whine (blade-pass, a few kHz, slightly inharmonic) over a
+      // broadband exhaust roar that grows with thrust; a low rumble underneath.
+      const n1 = Math.max(20, Math.min(100, rpm)) / 100;
+      this.chopDepth.gain.setTargetAtTime(0, t, k);
+      const whine = 1700 + n1 * 2300;
+      const f = [whine, whine * 1.47, 55 + n1 * 30, 110 + n1 * 60], g = [0.1, 0.05, 0.35, 0.18];
+      for (let i = 0; i < 4; i++) { this.osc[i].frequency.setTargetAtTime(f[i], t, 0.3); this.oscGain[i].gain.setTargetAtTime(g[i], t, 0.3); }
+      this.filter.frequency.setTargetAtTime(5200, t, k);
+      this.engineGain.gain.setTargetAtTime(0.18 + n1 * 0.25, t, 0.3);
+      this.noiseFilter.frequency.setTargetAtTime(350 + n1 * 900, t, 0.3); this.noiseFilter.Q.setTargetAtTime(0.4, t, 0.3);
+      this.noiseGain.gain.setTargetAtTime(0.3 + n1 * n1 * 1.1, t, 0.3);
+      this.windGain.gain.setTargetAtTime(Math.min(0.45, (speed / 200) ** 1.5 * 0.45), t, 0.2);
+      return;
+    }
+    this.noiseFilter.Q.setTargetAtTime(0.8, t, k);
     // propeller aircraft: near-constant RPM drone
     this.chopDepth.gain.setTargetAtTime(0, t, k);
     const fire = (rpm / 60) * (e.cylinders / 2);

@@ -97,7 +97,7 @@ export class Ui {
     keys.innerHTML = '<b>汽车</b>　W/S 油门・刹车　A/D 转向　空格 手刹<br><b>飞机</b>　W/S 压杆・拉杆　A/D 滚转　Q/E 方向舵　空格/Shift 加减油门<br><b>直升机</b>　W/S 前后　A/D 转向　Q/E 横移　空格/Shift 升降<br><b>C</b> 视角　<b>鼠标</b> 环顾・滚轮远近　<b>L</b> 灯　<b>R</b> 复位　<b>M</b> 地图　<b>N</b> 静音　<b>G</b> 车库';
     this.startBtn.type = 'button';
     this.startBtn.addEventListener('click', () => cb.onStart());
-    g.append(keys, this.startBtn, el('p', 'credit', '3D 城市模型: Project PLATEAU（国土交通省）/ 高程・航拍・地图: 国土地理院 / 道路: © OpenStreetMap contributors / 车辆: Kenney (CC0)'));
+    g.append(keys, this.startBtn, el('p', 'credit', '3D 城市模型: Project PLATEAU（国土交通省）/ 高程・航拍・地图: 国土地理院 / 道路: © OpenStreetMap contributors / 超跑模型: Khronos Car Concept (CC-BY 4.0)'));
 
     const h = this.hud;
     const speed = el('div', 'speed'); speed.append(this.speedNum, el('div', 'unit', 'KM/H'));

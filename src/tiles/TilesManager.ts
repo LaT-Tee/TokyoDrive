@@ -8,6 +8,7 @@ import { GLTFExtensionsPlugin, TilesFadePlugin } from '3d-tiles-renderer/plugins
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import { frame } from '../geo/geodesy';
+import { googleTexUniforms, GOOGLE_FACADE_GLSL } from './GoogleFill';
 import type { HeightGrid } from '../world/HeightGrid';
 import type { DeckProvider } from '../world/Ground';
 
@@ -103,11 +104,12 @@ class TextureLimitPlugin {
 function applyFacade(mat: THREE.MeshStandardMaterial): void {
   mat.color.setRGB(1, 1, 1);
   mat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, googleTexUniforms);
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nattribute float _batchid;\nvarying vec3 tdWP; varying vec3 tdWN; varying float tdSeed;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\n tdWP = (modelMatrix * vec4(position, 1.0)).xyz; tdWN = normalize(mat3(modelMatrix) * normal);\n tdSeed = fract(sin(_batchid * 12.9898 + modelMatrix[3].x * 0.0137 + modelMatrix[3].z * 0.0071) * 43758.5453);');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 tdWP; varying vec3 tdWN; varying float tdSeed;\nfloat tdHash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }')
+      .replace('#include <common>', '#include <common>\nvarying vec3 tdWP; varying vec3 tdWN; varying float tdSeed;\nuniform float tdGOn; uniform sampler2D tdGColor; uniform sampler2D tdGDepth; uniform vec2 tdGRes; uniform vec2 tdGNearFar; uniform float tdGRange;\nfloat tdHash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }')
       .replace('#include <color_fragment>', `#include <color_fragment>
         {
           vec3 n = normalize(tdWN);
@@ -128,6 +130,7 @@ function applyFacade(mat: THREE.MeshStandardMaterial): void {
           } else {
             diffuseColor.rgb = wall * 0.8;                     // roofs
           }
+          ${GOOGLE_FACADE_GLSL}
         }`);
   };
   mat.customProgramCacheKey = () => 'td-facade';
