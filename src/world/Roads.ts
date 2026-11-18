@@ -109,6 +109,61 @@ export class Roads {
     return best;
   }
 
+  /**
+   * The point `dist` metres further along the road nearest to (x, z), travelling the way
+   * closest to `heading`; at the end of a way it carries on into the connected way that
+   * continues most straight. Null when there is no road within 30 m.
+   */
+  ahead(x: number, z: number, heading: number, dist: number): { x: number; z: number; heading: number; id: number; bridge: boolean } | null {
+    // nearest segment
+    let w: Way | null = null, seg = 0, u = 0, bd = 30;
+    for (const c of this.ways.values()) {
+      if (c.tunnel || x < c.minX - bd || x > c.maxX + bd || z < c.minZ - bd || z > c.maxZ + bd) continue;
+      for (let k = 0; k < c.n - 1; k++) {
+        const ax = c.xs[k], az = c.zs[k], dx = c.xs[k + 1] - ax, dz = c.zs[k + 1] - az, l2 = dx * dx + dz * dz;
+        if (l2 < 1e-6) continue;
+        const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / l2));
+        const d = Math.hypot(ax + dx * t - x, az + dz * t - z);
+        if (d < bd) { bd = d; w = c; seg = k; u = t; }
+      }
+    }
+    if (!w) return null;
+    const segHeading = (c: Way, k: number, dir: number) => {
+      const a = dir > 0 ? k : k + 1, b = dir > 0 ? k + 1 : k;
+      return Math.atan2(c.xs[b] - c.xs[a], -(c.zs[b] - c.zs[a]));
+    };
+    const diff = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+    let dir = diff(segHeading(w, seg, 1), heading) <= Math.PI / 2 ? 1 : -1;
+    let px = w.xs[seg] + (w.xs[seg + 1] - w.xs[seg]) * u, pz = w.zs[seg] + (w.zs[seg + 1] - w.zs[seg]) * u;
+    let left = dist, hops = 0, h = segHeading(w, seg, dir);
+    for (;;) {
+      const node = dir > 0 ? seg + 1 : seg;
+      const nx = w.xs[node], nz = w.zs[node], l = Math.hypot(nx - px, nz - pz);
+      h = segHeading(w, seg, dir);
+      if (l >= left) { const f = left / Math.max(l, 1e-6); return { x: px + (nx - px) * f, z: pz + (nz - pz) * f, heading: h, id: w.id, bridge: w.bridge }; }
+      left -= l; px = nx; pz = nz;
+      const next = dir > 0 ? seg + 1 : seg - 1;
+      if (next >= 0 && next < w.n - 1) { seg = next; continue; }
+      // end of the way: continue on the connected way that goes on most straight
+      if (++hops > 20) return { x: px, z: pz, heading: h, id: w.id, bridge: w.bridge };
+      const key = w.keys[node];
+      let best: [Way, number, number] | null = null, bdiff = 1.3;
+      for (const c of this.ways.values()) {
+        if (c === w || c.tunnel || px < c.minX - 1 || px > c.maxX + 1 || pz < c.minZ - 1 || pz > c.maxZ + 1) continue;
+        const i = c.keys.indexOf(key);
+        if (i < 0) continue;
+        for (const [k2, d2] of [[i, 1], [i - 1, -1]] as [number, number][]) {
+          if (k2 < 0 || k2 >= c.n - 1) continue;
+          if (c.oneway && d2 < 0) continue;
+          const dd = diff(segHeading(c, k2, d2), h);
+          if (dd < bdiff) { bdiff = dd; best = [c, k2, d2]; }
+        }
+      }
+      if (!best) return { x: px, z: pz, heading: h, id: w.id, bridge: w.bridge };
+      [w, seg, dir] = best;
+    }
+  }
+
   nameAt(x: number, z: number): string {
     const c = this.nameCache;
     if (Math.hypot(x - c.x, z - c.z) < 8) return c.name;

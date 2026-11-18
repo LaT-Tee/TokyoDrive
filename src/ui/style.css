@@ -110,3 +110,5 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0c0e12; col
 .minimap canvas { display: block; border-radius: 50%; }
 .minimap-heading { position: absolute; left: 50%; bottom: -24px; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--line); padding: 2px 9px; font-size: 11px; letter-spacing: 0.08em; border-radius: 2px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 @media (max-width: 640px) { .minimap { width: 130px; height: 130px; bottom: 124px; } .minimap canvas { width: 130px !important; height: 130px !important; } }
+
+.toast { position: absolute; left: 50%; top: 74px; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--line); padding: 8px 14px; font-size: 13px; letter-spacing: 0.04em; border-radius: 3px; white-space: nowrap; pointer-events: none; text-shadow: none; }

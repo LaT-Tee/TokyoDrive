@@ -7,6 +7,8 @@ import { Ground } from './world/Ground';
 import { Roads } from './world/Roads';
 import { Vegetation } from './world/Vegetation';
 import { Decks } from './decks/Decks';
+import { RoadProfiles } from './roads/RoadProfiles';
+import { Unstuck } from './car/Unstuck';
 import { TUNNEL_H, Tunnels } from './tunnels/Tunnels';
 import { ROAD_LIFT, RoadSurface } from './roads/RoadSurface';
 import { TilesManager, type Manifest } from './tiles/TilesManager';
@@ -67,12 +69,33 @@ async function boot(): Promise<void> {
   scene.add(decks.group);
   const tunnels = new Tunnels(roads, terrain);
   scene.add(tunnels.group);
-  const roadSurface = new RoadSurface(roads, terrain, decks, tiles);
+  // every mapped street gets a smooth, continuous drivable surface (see RoadProfiles)
+  const streets = new RoadProfiles(roads, terrain, tiles);
+  streets.deckNode = (key) => decks.junctionHeight(key);
+  streets.deckOf = (id) => decks.profile(id);
+  decks.streetNode = (key) => streets.nodeHeight(key);
+  const roadSurface = new RoadSurface(roads, terrain, decks, tiles, streets);
+  const unstuck = new Unstuck();
   scene.add(roadSurface.group);
   const vegetation = new Vegetation(terrain, obstacles, roads);
   scene.add(vegetation.group);
   ground.decks.push(tiles, decks);
   ground.tunnels = tunnels;
+  ground.street = (x, z, refY) => streets.heightAt(x, z, refY);
+  // a place to rewind to must still have its surface there and no building on it
+  unstuck.setAhead((x, z, heading, dist) => {
+    const a = roads.ahead(x, z, heading, dist);
+    if (!a) return null;
+    const g = terrain.heightAt(a.x, a.z, car.y);
+    // on a bridge or a lifted approach: its deck; else the street
+    const y = a.bridge || decks.profile(a.id) ? Math.max(g, decks.deckHeight(a.x, a.z, car.y + 8), tiles.castDown(a.x, car.y + 8, a.z, 40)) : ground.surface(a.x, a.z, g + 1);
+    return { x: a.x, y, z: a.z, heading: a.heading };
+  });
+  unstuck.setSafe((p) => {
+    const s = ground.surface(p.x, p.z, p.y + 0.5);
+    if (Math.abs(s - p.y) > 1.5) return false;
+    return ground.lastOnStreet || ground.lastOnDeck || ground.lastInTunnel || !(obstacles.heightAt(p.x, p.z) > s + 2);
+  });
   ground.onRoad = (x, z) => { const r = roads.nearest(x, z, 12); return !!r && r.dist <= r.width / 2 - 0.3; };
   const googleFill = new GoogleFill(camera, renderer); // colour source only: never added to the scene
   const facadeBaker = new FacadeBaker(renderer, googleFill);
@@ -139,6 +162,7 @@ async function boot(): Promise<void> {
     car.y = terrain.heightAt(p.x, p.z);
     camHeading = car.heading; look.yaw = 0; look.pitch = 0;
     settled = false;
+    unstuck.reset(car, performance.now());
     if (flying()) {
       // aircraft are deployed straight into the air, already flying: no waiting for the ground
       airc.deploy(p.x, terrain.heightAt(p.x, p.z), p.z, car.heading);
@@ -368,7 +392,7 @@ async function boot(): Promise<void> {
     if (now - lastTerrain > 200) {
       lastTerrain = now;
       terrain.update(car.x, car.z, QUALITY[quality].terrainRadius, car.y);
-      roads.update(car.x, car.z); decks.update(car.x, car.z); tunnels.update(car.x, car.z);
+      roads.update(car.x, car.z); decks.update(car.x, car.z); tunnels.update(car.x, car.z); streets.update(car.x, car.z);
       roadSurface.update(car.x, car.z);
       vegetation.enabled = quality !== 'performance';
       vegetation.update(car.x, car.z);
@@ -395,7 +419,25 @@ async function boot(): Promise<void> {
           if (airc.y < floor + 1.2) { airc.y = floor + 1.2; airc.crashed = true; airc.speed = 0; crashAt = now; crashes++; }
         }
         syncAir();
-      } else car.update(dt, input);
+      } else {
+        car.update(dt, input);
+        // automatic rescue when the car cannot go on (see Unstuck)
+        const gy = terrain.heightAt(car.x, car.z, car.y);
+        ground.samples--; ground.surface(car.x, car.z, car.y);
+        const onRoad = ground.lastOnStreet || ground.lastOnDeck || ground.lastInTunnel;
+        const inBuilding = !onRoad && obstacles.heightAt(car.x, car.z) > car.y + 2 && !ground.onRoad?.(car.x, car.z);
+        const res = unstuck.update(now, dt, car, input, { onRoad, groundY: gy, inBuilding });
+        if (res) {
+          if (res.pose) {
+            car.x = res.pose.x; car.z = res.pose.z; car.heading = car.course = res.pose.heading;
+            car.y = ground.surface(car.x, car.z, res.pose.y + 0.5);
+            car.speed = 0; car.vy = 0; car.airborne = false;
+            ui.toast(res.back < 0 ? tr('hud.unstuckAhead', { m: Math.round(-res.back) }) : tr('hud.unstuck', { m: Math.round(res.back) }));
+          } else { recover(); ui.toast(tr('hud.unstuckRoad')); }
+          camHeading = car.heading;
+        } else if (unstuck.hint) ui.toast(tr('hud.stuckHint', { s: Math.ceil(unstuck.hint.left) }), 0);
+        else ui.toast('');
+      }
     }
     ui.setStartEnabled(settled);
 
@@ -455,7 +497,7 @@ async function boot(): Promise<void> {
   // ---- debug / test hooks (used by scripts/headless-check.mjs)
   (window as any).__td = {
     THREE, car, visual, airc, sound, googleFill, facadeBaker, ENGINE_WORKLET_SRC, get flying() { return flying(); }, get crashes() { return crashes; }, AIR_SPAWN_AGL,
-    ground, terrain, tiles, obstacles, roads, decks, tunnels, roadSurface, vegetation, sky, camera, renderer, fps, frame, look, map,
+    ground, terrain, tiles, obstacles, roads, decks, tunnels, roadSurface, streets, unstuck, vegetation, sky, camera, renderer, fps, frame, look, map,
     get settled() { return settled; }, get playing() { return playing; }, get inTunnel() { return inTunnel; },
     teleport, recover,
     /** Test helper: snap to the nearest road of at least the given class (0 motorway … 12 living street). */

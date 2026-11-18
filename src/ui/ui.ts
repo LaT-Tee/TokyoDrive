@@ -37,6 +37,8 @@ export class Ui {
   private camBtn = el('button', 'hud-btn');
   private lightBtn = el('button', 'hud-btn');
   private loading = el('div', 'loading hidden');
+  private toastEl = el('div', 'toast hidden');
+  private toastUntil = 0;
   private startBtn = el('button', 'go');
   private googleStatus = el('p', 'hint');
   private credits = el('div', 'credits');
@@ -61,7 +63,7 @@ export class Ui {
     btn(this.camBtn, cb.onCycleCamera); btn(this.lightBtn, cb.onToggleLights);
     // cockpit overlay: dashboard + steering wheel (right-hand drive)
     const dash = el('div', 'dash'); this.wheel.append(el('div', 'spoke'), el('div', 'spoke v')); this.cockpit.append(el('div', 'pillar l'), el('div', 'pillar r'), dash, this.wheel);
-    h.append(this.cockpit, speed, place, bar, this.loading, this.credits);
+    h.append(this.cockpit, speed, place, bar, this.loading, this.toastEl, this.credits);
     root.append(h, this.garage);
 
     this.buildGarage();
@@ -145,6 +147,15 @@ export class Ui {
 
   /** Add a widget to the driving HUD (hidden together with it while the garage is open). */
   mountHud(node: HTMLElement): void { this.hud.append(node); }
+
+  /** A short message in the middle of the HUD; `ms` = 0 shows it until replaced or cleared. */
+  toast(text: string, ms = 2600): void {
+    if (!text) { if (this.toastUntil === 0) this.toastEl.classList.add('hidden'); return; }
+    if (this.toastEl.textContent !== text) this.toastEl.textContent = text;
+    this.toastEl.classList.remove('hidden');
+    this.toastUntil = ms ? performance.now() + ms : 0;
+    if (ms) setTimeout(() => { if (performance.now() >= this.toastUntil - 5) this.toastEl.classList.add('hidden'); }, ms);
+  }
 
   setGoogleStatus(text: string): void { if (this.googleStatus.textContent !== text) this.googleStatus.textContent = text; }
   setCredits(text: string): void { if (this.credits.textContent !== text) this.credits.textContent = text; }

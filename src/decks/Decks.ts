@@ -22,6 +22,7 @@ const MAX_GRADE = 0.07;
 const THICK = 0.9;
 const RAIL_H = 0.95;
 const PILLAR_EVERY = 40;
+const NEAR_READY = 1200;   // m: deck nodes this close to the car need detailed terrain to be solved
 const COVERED = 0.85;       // model coverage above which the model alone carries the way
 const RAMP_MAX_LEN = 900;   // m of untagged approach that may be lifted, per chain
 const GAP_MAX_LEN = 250;    // m: untagged gap between two bridges of an ordinary road
@@ -34,6 +35,12 @@ interface Deck {
   /** Per segment: the real model is there, draw nothing procedural. */
   skip: Uint8Array | null;
   cov: number;
+  /** Solved while part of the way had no detailed terrain yet: solved again once it has. */
+  approx: boolean;
+  /** The nodes that had no detailed terrain then. */
+  approxKeys: string[];
+  /** Being replaced: still drivable until the new deck is built. */
+  stale: boolean;
 }
 
 /** Bridge deck height guess above the ground for a way without any measured anchor. */
@@ -80,6 +87,15 @@ export class Decks implements DeckProvider {
   /** True when a real PLATEAU bridge model carries this bridge way. */
   isCoveredWay(id: number): boolean { return !!this.decks.get(id)?.covered; }
 
+  /** Street height at a node (RoadProfiles), NaN if no street profile has fixed it yet. */
+  streetNode: ((key: string) => number) | null = null;
+  private streetAt(key: string, x: number, z: number): number {
+    const v = this.streetNode ? this.streetNode(key) : NaN;
+    return v === v ? v : this.terrain.heightAt(x, z);
+  }
+  /** Height given to a node where a street joins a deck (so the street can meet it), else NaN. */
+  junctionHeight(key: string): number { return this.anchors.has(key) ? this.nodeY.get(key) ?? NaN : NaN; }
+
   /** An untagged approach that is solved (and maybe lifted) together with the bridges. */
   isRamp(id: number): boolean { return this.rampIds.has(id); }
 
@@ -123,7 +139,7 @@ export class Decks implements DeckProvider {
         for (let k = 0; k < w.n; k++) {
           const key = w.keys[k];
           if (!this.anchors.has(key) || this.modelKeys.has(key)) continue;
-          if (Math.abs(d.ys[k] - this.terrain.heightAt(w.xs[k], w.zs[k])) > 1) { this.forget(id, d); break; }
+          if (Math.abs(d.ys[k] - this.streetAt(key, w.xs[k], w.zs[k])) > 1) { this.forget(id, d); break; }
         }
       }
     }
@@ -135,16 +151,30 @@ export class Decks implements DeckProvider {
       if (!d || d.covered || d.ramp || !d.built) continue;
       if (this.cov(d.way) - d.cov > 0.08) this.forget(id, d); // more of the real model now: rebuilt around it (tiles swapping detail out are ignored)
     }
+    for (const d of this.decks.values()) {
+      if (!d.approx || d.stale) continue;
+      const w = d.way;
+      if (w.keys.every((_, k) => this.terrain.isReady(w.xs[k], w.zs[k]))) {
+        // the heights guessed on rough terrain go, and every deck that was solved against
+        // them is solved again too (still drivable until its replacement is built)
+        const rough = new Set(d.approxKeys);
+        for (const key of rough) if (!this.modelKeys.has(key)) this.nodeY.delete(key);
+        for (const o of this.decks.values()) if (o.built && o.way.keys.some((k) => rough.has(k))) o.stale = true;
+        d.stale = true; this.pendingNone = false;
+      }
+    }
     if (this.queue.length) { this.buildQueued(t0, null); return; }
     if (this.roadsVersion === this.roads.version && this.pendingNone) return;
     this.roadsVersion = this.roads.version;
     this.pendingNone = true;
     const batch: Way[] = [];
     for (const w of this.graph) {
-      if (this.decks.has(w.id)) continue;
+      if (this.decks.has(w.id) && !this.decks.get(w.id)!.stale) continue;
       if (x < w.minX - BUILD_RANGE || x > w.maxX + BUILD_RANGE || z < w.minZ - BUILD_RANGE || z > w.maxZ + BUILD_RANGE) { this.pendingNone = false; continue; }
+      // a long viaduct (2+ km) is built before the far end's detailed terrain is in: only the
+      // part near the car has to be ready, the rest is solved again once it is (see approx)
       let ready = true;
-      for (let k = 0; k < w.n; k++) if (!this.terrain.isReady(w.xs[k], w.zs[k])) { ready = false; break; }
+      for (let k = 0; k < w.n; k++) if (!this.terrain.isReady(w.xs[k], w.zs[k]) && Math.hypot(w.xs[k] - x, w.zs[k] - z) < NEAR_READY) { ready = false; break; }
       if (!ready) { this.pendingNone = false; continue; }
       batch.push(w);
     }
@@ -162,7 +192,9 @@ export class Decks implements DeckProvider {
       if (this.rampIds.has(w.id)) { solve.push(w); continue; }
       const cov = this.cov(w);
       if (cov >= COVERED) {
-        this.decks.set(w.id, { way: w, ys: new Float64Array(w.n), mesh: null, covered: true, ramp: false, built: false, skip: null, cov });
+        const old = this.decks.get(w.id);
+        if (old) this.disposeMesh(old);
+        this.decks.set(w.id, { way: w, ys: new Float64Array(w.n), mesh: null, covered: true, ramp: false, built: false, skip: null, cov, approx: false, approxKeys: [], stale: false });
         this.adoptModel(w); this.markDirty(w); this.version++;
       } else {
         if (cov > 0.05) this.adoptModel(w, true);
@@ -188,11 +220,14 @@ export class Decks implements DeckProvider {
     while (this.queue.length) {
       if (built && performance.now() - t0 > 10) { this.pendingNone = false; break; }
       const [w, ys] = this.queue.shift()!;
-      if (this.decks.has(w.id) || !this.roads.ways.has(w.id)) continue;
+      const old = this.decks.get(w.id);
+      if ((old && !old.stale) || !this.roads.ways.has(w.id)) continue;
+      if (old) { this.disposeMesh(old); this.decks.delete(w.id); }
       const ramp = this.rampIds.has(w.id);
       let lifted = !ramp;
       if (ramp) for (let k = 0; k < w.n; k++) if (ys[k] - this.terrain.heightAt(w.xs[k], w.zs[k]) > 0.35) { lifted = true; break; }
-      const d: Deck = { way: w, ys, mesh: null, covered: false, ramp, built: lifted, skip: null, cov: ramp ? 0 : this.cov(w) };
+      const approxKeys = w.keys.filter((_, k) => !this.terrain.isReady(w.xs[k], w.zs[k]));
+      const d: Deck = { way: w, ys, mesh: null, covered: false, ramp, built: lifted, skip: null, cov: ramp ? 0 : this.cov(w), approx: approxKeys.length > 0, approxKeys, stale: false };
       this.decks.set(w.id, d);
       if (!lifted) continue; // an approach that stays on the ground: ordinary road
       if (!ramp) d.skip = this.modelSegments(w, ys);
@@ -376,13 +411,12 @@ export class Decks implements DeckProvider {
       const cov = this.decks.get(w.id)?.covered;
       for (let k = 0; k < w.n; k++) {
         const key = w.keys[k];
-        if (!this.terrain.isReady(w.xs[k], w.zs[k])) continue;
         const g = this.terrain.heightAt(w.xs[k], w.zs[k]);
         // a street junction is at street level, unless a real model says otherwise
         const fixed = anchors.has(key) && !this.modelKeys.has(key) ? undefined : this.nodeY.get(key);
         if (fixed !== undefined) { upper.set(key, fixed); lower.set(key, fixed); desired.set(key, fixed); fixedKeys.add(key); }
         else if (fixedKeys.has(key)) continue;
-        else if (anchors.has(key)) { upper.set(key, g); lower.set(key, g); desired.set(key, g); fixedKeys.add(key); }
+        else if (anchors.has(key)) { const sg = this.streetAt(key, w.xs[k], w.zs[k]); upper.set(key, sg); lower.set(key, sg); desired.set(key, sg); fixedKeys.add(key); }
         else if (cov) continue;
         else {
           const want = ramp ? g : g + guess(w);

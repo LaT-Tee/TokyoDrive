@@ -12,6 +12,7 @@ import type { Terrain } from '../world/Terrain';
 import type { Decks } from '../decks/Decks';
 import type { TilesManager } from '../tiles/TilesManager';
 import { RoadEdges } from './RoadEdges';
+import type { RoadProfiles } from './RoadProfiles';
 
 const CELL = 200;         // m; geometry is batched per cell
 const BUILD_RANGE = 500;  // cells within this distance of the car are paved
@@ -19,6 +20,8 @@ const DROP_RANGE = 750;
 const STEP = 4;           // m between centreline samples
 export const ROAD_LIFT = 0.1;
 const PAINT_LIFT = 0.07;
+/** Terrain crossfall kept across a street's width (the street itself is normalized). */
+const crossfall = (dh: number) => Math.max(-0.3, Math.min(0.3, dh));
 const WHITE: [number, number, number] = [0.82, 0.82, 0.8];
 const YELLOW: [number, number, number] = [0.85, 0.6, 0.08];
 
@@ -70,7 +73,7 @@ export class RoadSurface {
   private paintMat = new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -40 });
   builtCells = 0;
 
-  constructor(private roads: Roads, private terrain: Terrain, private decks: Decks, private tiles: TilesManager) { this.group.name = 'road-surface'; }
+  constructor(private roads: Roads, private terrain: Terrain, private decks: Decks, private tiles: TilesManager, private profiles: RoadProfiles) { this.group.name = 'road-surface'; }
 
   update(x: number, z: number): void {
     if (!this.roads.enabled) return;
@@ -134,6 +137,7 @@ export class RoadSurface {
     // a bridge, or an expressway approach lifted to meet one: follow the solved deck heights
     deckYs = this.decks.profile(w.id);
     if (w.bridge && !deckYs) { if (this.decks.isCoveredWay(w.id)) onModel = true; else return null; } // deck not built yet (not cached: retry)
+    if (!deckYs && !onModel && !this.profiles.has(w.id)) return null; // street surface not solved yet: retry
     const xs: number[] = [], zs: number[] = [], ss: number[] = [], ys: number[] = [];
     const nodeS: number[] = [];
     let s = 0;
@@ -191,9 +195,12 @@ export class RoadSurface {
       }
       const lx = xs[i] - d.rx[i] * hw, lz = zs[i] - d.rz[i] * hw, rx2 = xs[i] + d.rx[i] * hw, rz2 = zs[i] + d.rz[i] * hw;
       if (!this.terrain.isReady(lx, lz) || !this.terrain.isReady(rx2, rz2)) return null; // not cached: retry later
-      d.yL[i] = this.terrain.heightAt(lx, lz) + ROAD_LIFT;
-      d.yC[i] = this.terrain.heightAt(xs[i], zs[i]) + ROAD_LIFT;
-      d.yR[i] = this.terrain.heightAt(rx2, rz2) + ROAD_LIFT;
+      // the street's normalized surface (what the car drives on), with a little of the
+      // terrain's crossfall so the edges still sit on the ground beside it
+      const tc = this.terrain.heightAt(xs[i], zs[i]), sy = this.profiles.alongWay(w.id, ss[i]);
+      d.yC[i] = sy + ROAD_LIFT;
+      d.yL[i] = sy + crossfall(this.terrain.heightAt(lx, lz) - tc) + ROAD_LIFT;
+      d.yR[i] = sy + crossfall(this.terrain.heightAt(rx2, rz2) - tc) + ROAD_LIFT;
     }
     if (onModel) {
       // The topmost hit can be a tower beam, cable or sign gantry: replace outliers by the
@@ -254,9 +261,9 @@ export class RoadSurface {
       L -= 0.12; R -= 0.12;
       d.co[i] = (R - L) / 2; d.hwI[i] = (L + R) / 2; d.fitted[i] = 1;
       const cx = d.xs[i] + d.rx[i] * d.co[i], cz = d.zs[i] + d.rz[i] * d.co[i];
-      d.yC[i] = this.terrain.heightAt(cx, cz) + ROAD_LIFT;
-      d.yL[i] = this.terrain.heightAt(cx - d.rx[i] * d.hwI[i], cz - d.rz[i] * d.hwI[i]) + ROAD_LIFT;
-      d.yR[i] = this.terrain.heightAt(cx + d.rx[i] * d.hwI[i], cz + d.rz[i] * d.hwI[i]) + ROAD_LIFT;
+      const tc = this.terrain.heightAt(cx, cz), sy = d.yC[i] - ROAD_LIFT;
+      d.yL[i] = sy + crossfall(this.terrain.heightAt(cx - d.rx[i] * d.hwI[i], cz - d.rz[i] * d.hwI[i]) - tc) + ROAD_LIFT;
+      d.yR[i] = sy + crossfall(this.terrain.heightAt(cx + d.rx[i] * d.hwI[i], cz + d.rz[i] * d.hwI[i]) - tc) + ROAD_LIFT;
     }
   }
 
