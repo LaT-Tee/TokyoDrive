@@ -12,10 +12,10 @@ export const SPAWNS: SpawnPoint[] = [
   { id: 'rainbow', name: 'レインボーブリッジ', lat: 35.6367, lon: 139.7636, heading: 135 },
 ];
 
-// Base URL for self-hosted data (manifest, tiles, OSM bake). Any static HTTP
-// server works; default is the dev server's /data mount.
-export const DATA_BASE: string =
-  (import.meta.env?.VITE_DATA_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? '/data';
+// Data (manifest, OSM bake, downloaded tiles) is read from /data: the dev / preview server
+// serves the local ./data directory there first (tiles fetched by scripts/download.mjs),
+// then public/data. Layers that are not on this machine stream from the official endpoints.
+export const DATA_BASE = '/data';
 
 export type Quality = 'performance' | 'balanced' | 'ultra';
 export interface QualityPreset {

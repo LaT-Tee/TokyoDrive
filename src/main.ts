@@ -8,6 +8,7 @@ import { Roads } from './world/Roads';
 import { Vegetation } from './world/Vegetation';
 import { Decks } from './decks/Decks';
 import { RoadProfiles } from './roads/RoadProfiles';
+import { StreetMask, streetCarve } from './roads/StreetMask';
 import { Unstuck } from './car/Unstuck';
 import { TUNNEL_H, Tunnels } from './tunnels/Tunnels';
 import { ROAD_LIFT, RoadSurface } from './roads/RoadSurface';
@@ -71,11 +72,14 @@ async function boot(): Promise<void> {
   scene.add(tunnels.group);
   // every mapped street gets a smooth, continuous drivable surface (see RoadProfiles)
   const streets = new RoadProfiles(roads, terrain, tiles);
-  streets.deckNode = (key) => decks.junctionHeight(key);
+  streets.deckNode = (key) => { const d = decks.junctionHeight(key); return d === d ? d : tunnels.portalHeight(key); };
+  tunnels.streetNode = (key) => streets.nodeHeight(key);
+  decks.onStreet = (x, z) => roads.groundRoadAt(x, z, 1.3);
   streets.deckOf = (id) => decks.profile(id);
   decks.streetNode = (key) => streets.nodeHeight(key);
   const roadSurface = new RoadSurface(roads, terrain, decks, tiles, streets);
   const unstuck = new Unstuck();
+  const streetMask = new StreetMask(streets);
   scene.add(roadSurface.group);
   const vegetation = new Vegetation(terrain, obstacles, roads);
   scene.add(vegetation.group);
@@ -385,15 +389,24 @@ async function boot(): Promise<void> {
       } else if (airMode) { airMode = false; tiles.loadDistance = QUALITY[quality].loadDistance; tiles.setErrorTarget(QUALITY[quality].errorTarget); tiles.farEnabled = false; }
       if (flying()) { /* no tyres on the ground */ }
       else if (inTunnel) car.surfaceGrip = 1;
-      else if (roads.enabled && roads.hasData(car.x, car.z)) { const r = roads.nearest(car.x, car.z, 14); car.surfaceGrip = r && r.dist <= r.width / 2 + 1.2 ? 1 : 0.62; } else car.surfaceGrip = 1;
+      else if (roads.enabled && roads.hasData(car.x, car.z)) {
+        ground.samples--; ground.surface(car.x, car.z, car.y);
+        const paved = ground.lastOnStreet || ground.lastOnDeck;
+        const r = paved ? null : roads.nearest(car.x, car.z, 14);
+        car.surfaceGrip = paved || (r && r.dist <= r.width / 2 + 1.2) ? 1 : 0.62;
+      } else car.surfaceGrip = 1;
     }
     if (tiles.version !== tilesVersion) { tilesVersion = tiles.version; sky.invalidateShadows(); }
 
     if (now - lastTerrain > 200) {
       lastTerrain = now;
       terrain.update(car.x, car.z, QUALITY[quality].terrainRadius, car.y);
-      roads.update(car.x, car.z); decks.update(car.x, car.z); tunnels.update(car.x, car.z); streets.update(car.x, car.z);
+      // in the air the street surfaces only feed the painted roads seen from above: build them
+      // slowly, and leave the building cut-outs as they are once well above the ground
+      const high = flying() && car.y - terrain.heightAt(car.x, car.z) > 80;
+      roads.update(car.x, car.z); decks.update(car.x, car.z); tunnels.update(car.x, car.z); streets.update(car.x, car.z, flying() ? 1 : 4);
       roadSurface.update(car.x, car.z);
+      if (!high) streetMask.update(car.x, car.z, now);
       vegetation.enabled = quality !== 'performance';
       vegetation.update(car.x, car.z);
     }
@@ -497,7 +510,7 @@ async function boot(): Promise<void> {
   // ---- debug / test hooks (used by scripts/headless-check.mjs)
   (window as any).__td = {
     THREE, car, visual, airc, sound, googleFill, facadeBaker, ENGINE_WORKLET_SRC, get flying() { return flying(); }, get crashes() { return crashes; }, AIR_SPAWN_AGL,
-    ground, terrain, tiles, obstacles, roads, decks, tunnels, roadSurface, streets, unstuck, vegetation, sky, camera, renderer, fps, frame, look, map,
+    ground, terrain, tiles, obstacles, roads, decks, tunnels, roadSurface, streets, unstuck, streetCarve, vegetation, sky, camera, renderer, fps, frame, look, map,
     get settled() { return settled; }, get playing() { return playing; }, get inTunnel() { return inTunnel; },
     teleport, recover,
     /** Test helper: snap to the nearest road of at least the given class (0 motorway … 12 living street). */

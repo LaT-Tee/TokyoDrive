@@ -53,7 +53,8 @@ export class RoadProfiles {
   /** Street height at a node, if a street profile has fixed it. */
   nodeHeight(key: string): number { const v = this.nodeH.get(key); return v === undefined ? NaN : v; }
 
-  update(x: number, z: number): void {
+  /** @param budgetMs time per tick for building new street surfaces */
+  update(x: number, z: number, budgetMs = 4): void {
     if (!this.roads.enabled) return;
     for (const [id, p] of this.profiles) {
       const w = p.way;
@@ -71,7 +72,7 @@ export class RoadProfiles {
     }
     todo.sort((a, b) => a[1] - b[1]);
     for (const [w] of todo) {
-      if (performance.now() - now > 4) break;
+      if (performance.now() - now > budgetMs) break;
       this.build(w);
     }
   }
@@ -218,4 +219,19 @@ export class RoadProfiles {
   }
 
   has(id: number): boolean { return this.profiles.has(id); }
+
+  /** Every street segment inside a box: endpoints with their surface heights, and half width. */
+  forEachSegment(x0: number, z0: number, x1: number, z1: number, f: (ax: number, az: number, ay: number, bx: number, bz: number, by: number, hw: number) => void): void {
+    for (const p of this.profiles.values()) {
+      const w = p.way;
+      if (w.maxX < x0 - 20 || w.minX > x1 + 20 || w.maxZ < z0 - 20 || w.minZ > z1 + 20) continue;
+      const deck = this.deckOf ? this.deckOf(w.id) : null;
+      let prevY = deck ? this.onDeck(p, deck, 0) : p.ys[0];
+      for (let i = 0; i < p.n - 1; i++) {
+        const y1 = deck ? this.onDeck(p, deck, p.s[i + 1]) : p.ys[i + 1];
+        f(p.xs[i], p.zs[i], prevY, p.xs[i + 1], p.zs[i + 1], y1, p.hw);
+        prevY = y1;
+      }
+    }
+  }
 }

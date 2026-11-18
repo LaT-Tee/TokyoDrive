@@ -9,6 +9,7 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import { frame } from '../geo/geodesy';
 import { facadeUniforms } from './FacadeBaker';
+import { STREET_CARVE_GLSL, streetCarve } from '../roads/StreetMask';
 import type { HeightGrid } from '../world/HeightGrid';
 import type { DeckProvider } from '../world/Ground';
 
@@ -151,21 +152,26 @@ export const distanceFade = {
   tdNearFade: { value: new THREE.Vector2(800, 1000) },   // detail layer: fade between x and y metres
   tdFarFade: { value: new THREE.Vector2(8000, 9500) },   // far layer: its own outer edge
 };
-function addDistanceFade(mat: THREE.Material, far: boolean): void {
+function addDistanceFade(mat: THREE.Material, far: boolean, carve = false): void {
   if ((mat as any).userData?.tdFade) return;
   (mat as any).userData = { ...(mat as any).userData, tdFade: true };
+  // buildings keep mapped streets clear (see StreetMask); the inside of a cut shows as dark wall
+  if (carve) mat.side = THREE.DoubleSide;
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = (shader, r) => {
     prev?.call(mat, shader, r);
     Object.assign(shader.uniforms, distanceFade);
+    if (carve) Object.assign(shader.uniforms, streetCarve);
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying float tdViewDepth;')
-      .replace('#include <project_vertex>', '#include <project_vertex>\n tdViewDepth = -mvPosition.z;');
+      .replace('#include <common>', '#include <common>\nvarying float tdViewDepth;' + (carve ? '\nvarying vec3 tdWorld;' : ''))
+      .replace('#include <project_vertex>', '#include <project_vertex>\n tdViewDepth = -mvPosition.z;' + (carve ? '\n tdWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;' : ''));
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
         varying float tdViewDepth; uniform vec2 tdNearFade; uniform vec2 tdFarFade;
+        ${carve ? 'varying vec3 tdWorld; uniform sampler2D tdStreetMask; uniform vec4 tdStreetBox; uniform float tdStreetClear;' : ''}
         float tdIGN(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }`)
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+        ${carve ? STREET_CARVE_GLSL : ''}
         {
           float tdT = tdIGN(gl_FragCoord.xy);
           float tdNearA = 1.0 - smoothstep(tdNearFade.x, tdNearFade.y, tdViewDepth);
@@ -174,8 +180,16 @@ function addDistanceFade(mat: THREE.Material, far: boolean): void {
             : 'if (tdT >= tdNearA) discard;'}
         }`);
   };
+  if (carve) {
+    // the back of a wall seen through a cut: dark, unlit-looking
+    const prev2 = mat.onBeforeCompile;
+    mat.onBeforeCompile = (shader, r) => {
+      prev2.call(mat, shader, r);
+      shader.fragmentShader = shader.fragmentShader.replace('#include <dithering_fragment>', '#include <dithering_fragment>\n if (!gl_FrontFacing) gl_FragColor.rgb *= 0.35;');
+    };
+  }
   const key = mat.customProgramCacheKey.bind(mat);
-  mat.customProgramCacheKey = () => key() + (far ? '|tdfade-far' : '|tdfade');
+  mat.customProgramCacheKey = () => key() + (far ? '|tdfade-far' : '|tdfade') + (carve ? '|tdcarve' : '');
 }
 
 /** PLATEAU materials ship with roughness 0 (mirror-like): make them matte; untextured ones get a facade. */
@@ -190,7 +204,7 @@ function prepareMaterials(scene: THREE.Object3D, type: string): void {
         if (type === 'bldg' || type === 'bldgFar') applyFacade(s);
         else s.color.setRGB(0.34, 0.32, 0.3); // untextured: dim to balance against photo-textured tiles
       }
-      addDistanceFade(s, type === 'bldgFar');
+      addDistanceFade(s, type === 'bldgFar', type === 'bldg');
     }
   });
 }

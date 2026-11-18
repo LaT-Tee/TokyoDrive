@@ -29,7 +29,14 @@ export class Tunnels {
   private mat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
   private lightMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.55, 0.5, 0.38), side: THREE.DoubleSide });
 
+  /** Street height at a node (RoadProfiles): a portal meets its street exactly. NaN if unknown. */
+  streetNode: ((key: string) => number) | null = null;
+  private portals = new Set<string>();
+
   constructor(private roads: Roads, private terrain: Terrain) { this.group.name = 'tunnels'; }
+
+  /** Floor height given to a portal node (where a street joins), else NaN. */
+  portalHeight(key: string): number { return this.portals.has(key) ? this.nodeY.get(key) ?? NaN : NaN; }
 
   get count(): number { return this.tubes.size; }
 
@@ -77,7 +84,10 @@ export class Tunnels {
       const g = this.terrain.heightAt(w.xs[k], w.zs[k]);
       const fixed = this.nodeY.get(key);
       if (fixed !== undefined) { lower.set(key, fixed); upper.set(key, fixed); desired.set(key, fixed); }
-      else if (anchors.has(key)) { lower.set(key, g); upper.set(key, g); desired.set(key, g); }
+      else if (anchors.has(key)) {
+        const st = this.streetNode ? this.streetNode(key) : NaN, h = st === st ? st : g;
+        lower.set(key, h); upper.set(key, h); desired.set(key, h); this.portals.add(key);
+      }
       else desired.set(key, Math.min(desired.get(key) ?? Infinity, g - DEPTH * Math.max(1, Math.abs(w.layer))));
     }
     for (let pass = 0; pass < 60; pass++) {

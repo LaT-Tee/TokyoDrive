@@ -43,9 +43,10 @@ export class Ground {
     this.lastOnStreet = st === st;
     if (this.lastOnStreet) h = st;
     // inside a tunnel corridor at tunnel level, the floor wins over the terrain above it -
-    // but a car on a street that crosses the tunnel's open cut stays on the street
+    // but where a street crosses the tunnel's open cut, the car keeps to whichever of the
+    // two it is on (the one nearer its own height)
     const tf = this.tunnels ? this.tunnels.floorAt(x, z, refY) : NaN;
-    if (tf === tf && tf < h + 0.3 && !(this.lastOnStreet && refY > st - 1.5)) {
+    if (tf === tf && tf < h + 0.3 && !(this.lastOnStreet && Math.abs(st - refY) <= Math.abs(tf - refY))) {
       this.lastInTunnel = h - tf > 2.5;
       h = Math.min(h, tf);
       this.lastOnStreet = false;

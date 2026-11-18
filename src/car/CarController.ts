@@ -12,6 +12,10 @@ export interface CarInput { throttle: number; brake: number; steer: number; hand
 
 const D2R = Math.PI / 180;
 const G = 9.81;
+// Aerodynamic drag per unit mass (m^-1, a = K_DRAG v^2) and rolling resistance on asphalt.
+// Engine power is derived from them: at the spec's top speed drive force = drag + rolling.
+const K_DRAG = 0.000475;
+const ROLL = 0.15;
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
 export class CarController {
@@ -61,7 +65,11 @@ export class CarController {
     const traction = mu * G * s.traction;
     if (input.throttle > 0) {
       if (v < -0.3) a += Math.min(s.brake, mu * 10.5) * input.throttle;                 // braking out of reverse
-      else a += Math.min(traction, s.accel * Math.min(1, 9 / Math.max(av, 9)) ** 0.55) * input.throttle * Math.max(0, 1 - (v / vmax) ** 2);
+      else {
+        // grip-, then power-limited: P/m = vmax (K_DRAG vmax^2 + ROLL), so the car really reaches vmax
+        const power = vmax * (K_DRAG * vmax * vmax + ROLL);
+        a += Math.min(traction, s.accel, power / Math.max(av, 1)) * input.throttle;
+      }
     }
     if (input.brake > 0) {
       if (v > 0.3) a -= Math.min(s.brake, mu * 10.5) * input.brake;                     // brake
@@ -69,7 +77,7 @@ export class CarController {
     }
     // rolling resistance (much higher off the road), engine braking, aero drag
     const coast = input.throttle === 0 ? 0.55 : 0;
-    a -= Math.sign(v) * ((offRoad ? 1.5 : 0.3) + coast + 0.00085 * v * v);
+    a -= Math.sign(v) * ((offRoad ? 1.5 : ROLL) + coast + K_DRAG * v * v);
     if (input.handbrake) a -= Math.sign(v) * Math.min(9, mu * 8.5);
     // sliding sideways scrubs speed
     a -= Math.sign(v) * Math.abs(Math.sin(this.slip)) * mu * G * 0.55;

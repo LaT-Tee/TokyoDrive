@@ -1,7 +1,7 @@
 // Copies the baked OSM road data into public/data so that it ships with the
 // site (the app reads `${DATA_BASE}/manifest.json` and `${DATA_BASE}/osm/...`).
-// Building tiles are NOT copied: they stream from the official PLATEAU endpoint
-// unless you host them yourself and set VITE_DATA_BASE_URL.
+// Building tiles are NOT copied: they stream from the official PLATEAU endpoint, or from
+// ./data when they were downloaded to this machine (served first at /data).
 //   node scripts/osm.mjs && node scripts/publish-data.mjs
 import { cpSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';

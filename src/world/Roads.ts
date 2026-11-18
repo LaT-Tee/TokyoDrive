@@ -164,6 +164,22 @@ export class Roads {
     }
   }
 
+  /** True when (x, z) is on the carriageway of a ground-level road (not a bridge or tunnel). */
+  groundRoadAt(x: number, z: number, margin = 1): boolean {
+    for (const w of this.ways.values()) {
+      if (w.bridge || w.tunnel) continue;
+      const m = w.width / 2 + margin;
+      if (x < w.minX - m || x > w.maxX + m || z < w.minZ - m || z > w.maxZ + m) continue;
+      for (let k = 0; k < w.n - 1; k++) {
+        const ax = w.xs[k], az = w.zs[k], dx = w.xs[k + 1] - ax, dz = w.zs[k + 1] - az, l2 = dx * dx + dz * dz;
+        if (l2 < 1e-6) continue;
+        const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / l2));
+        if (Math.hypot(ax + dx * t - x, az + dz * t - z) <= m) return true;
+      }
+    }
+    return false;
+  }
+
   nameAt(x: number, z: number): string {
     const c = this.nameCache;
     if (Math.hypot(x - c.x, z - c.z) < 8) return c.name;

@@ -87,6 +87,8 @@ export class Decks implements DeckProvider {
   /** True when a real PLATEAU bridge model carries this bridge way. */
   isCoveredWay(id: number): boolean { return !!this.decks.get(id)?.covered; }
 
+  /** True where a mapped street runs on the ground at (x, z): no pillar goes there. */
+  onStreet: ((x: number, z: number, y: number) => boolean) | null = null;
   /** Street height at a node (RoadProfiles), NaN if no street profile has fixed it yet. */
   streetNode: ((key: string) => number) | null = null;
   private streetAt(key: string, x: number, z: number): number {
@@ -540,9 +542,21 @@ export class Decks implements DeckProvider {
       // pillars
       let at2 = PILLAR_EVERY - run;
       while (!d.ramp && at2 < len) {
-        const t = at2 / len, px = sx + (ex - sx) * t, pz = sz + (ez - sz) * t, top = d.ys[k] + (d.ys[k + 1] - d.ys[k]) * t - THICK;
+        const t = at2 / len, top = d.ys[k] + (d.ys[k + 1] - d.ys[k]) * t - THICK;
+        let px = sx + (ex - sx) * t, pz = sz + (ez - sz) * t;
+        // a pillar never stands in a street below: move it sideways under the deck to the
+        // edge of the street, else leave it out (the deck spans a little further)
+        let blocked = false;
+        if (this.onStreet && this.onStreet(px, pz, 0)) {
+          blocked = true;
+          const rx = -(ez - sz) / (len || 1), rz = (ex - sx) / (len || 1);
+          for (const o of [0.45, -0.45, 0.8, -0.8]) {
+            const qx = px + rx * o * hw, qz = pz + rz * o * hw;
+            if (!this.onStreet(qx, qz, 0)) { px = qx; pz = qz; blocked = false; break; }
+          }
+        }
         const g = this.terrain.heightAt(px, pz) - 1;
-        if (top - g > 3.5) {
+        if (top - g > 3.5 && !blocked) {
           const s = Math.min(1.1, hw * 0.35), x = px - ox, z = pz - oz;
           const c = [[x - s, z - s], [x + s, z - s], [x + s, z + s], [x - s, z + s]];
           for (let i = 0; i < 4; i++) {

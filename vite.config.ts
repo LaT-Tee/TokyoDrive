@@ -2,10 +2,10 @@ import { defineConfig, type Plugin } from 'vite';
 import { createReadStream, statSync } from 'node:fs';
 import { join, normalize, extname } from 'node:path';
 
-// Serves the git-ignored ./data directory (self-hosted tiles) at /data in dev
-// and preview. Tiles are never bundled into the build (CLAUDE.md §4). In
-// production point VITE_DATA_BASE_URL at any static HTTP server hosting data/
-// (see scripts/serve-data.mjs).
+// Serves the git-ignored ./data directory (tiles downloaded by scripts/download.mjs) at
+// /data in dev and preview, ahead of public/data: local data always wins, and whatever is
+// not on this machine falls through to public/data / the official streaming endpoints.
+// Tiles are never bundled into the build (CLAUDE.md §4).
 const MIME: Record<string, string> = {
   '.json': 'application/json', '.b3dm': 'application/octet-stream', '.glb': 'model/gltf-binary',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.bin': 'application/octet-stream',

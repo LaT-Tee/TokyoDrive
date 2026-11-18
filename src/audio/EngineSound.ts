@@ -29,6 +29,7 @@ class TdEngine extends AudioWorkletProcessor {
     this.popEnv = 0; this.popLow = 0; this.popNoise = 0; this.cut = 0;
     this.tq = 0; this.want = 0.1; // smoothed torque and loudness target
     this.seed = 22222;
+    this.ph = 0;               // phase of the half-order (firing / 2) partial, in cycles
     this.port.onmessage = (m) => {
       const d = m.data;
       if (d.gear !== undefined && d.gear > this.p.gear && this.p.load > 0.4) { this.cut = 0.06; this.pendingBang = 0.05; } // up-shift under power: a brief lift, never silence
@@ -92,15 +93,15 @@ class TdEngine extends AudioWorkletProcessor {
       let mix = [0, 0];
       for (let b = 0; b < 2; b++) {
         const x = this.e[b]; this.e[b] *= pulseDecay; this.nz[b] *= Math.exp(-dt / 0.004);
-        const n = (this.rnd() * 2 - 1) * this.nz[b] * (0.25 + 0.5 * torque);       // combustion roughness
+        const n = (this.rnd() * 2 - 1) * this.nz[b] * (0.08 + 0.15 * torque);      // combustion roughness (a little: too much is hiss)
         const o = b * 4, d = b ? 1.07 : 1;                                             // banks are not identical
         const low = this.res(o, x, (v8 ? 92 : cyl === 6 ? 118 : 132) * d, 0.022);     // pipe fundamental: the body
         const mid = this.res(o + 1, x + n, (v8 ? 265 : 340) * d, 0.007);              // muffler / mid-pipe
-        const hi = this.res(o + 2, x + n * 2, (900 + rev * 1500) * d, 0.0016);        // rasp, grows with revs
+        const hi = this.res(o + 2, x + n * 0.6, (900 + rev * 1500) * d, 0.0016);      // rasp, grows with revs
         const tip = this.res(o + 3, x, (48 + 14 * b), 0.05);                          // tailpipe thump
         // the deep pipe modes dominate at low revs and give way to the firing order higher up
         const deep = (1 - rev) * (1 - rev);
-        mix[b] = low * (0.7 + 1.2 * deep) + tip * 1.0 * deep + mid * (1.0 + 0.6 * torque) + hi * (0.3 + 1.0 * torque * rev) + x * (0.1 + 0.35 * rev);
+        mix[b] = low * (0.7 + 1.2 * deep) + tip * 1.0 * deep + mid * (1.0 + 0.6 * torque) + hi * (0.15 + 0.45 * torque * rev) + x * (0.1 + 0.25 * rev);
       }
 
       // --- pops: a sharp crack plus a low thud, both short
@@ -109,15 +110,23 @@ class TdEngine extends AudioWorkletProcessor {
       this.sub += 2 * Math.PI * 58 * dt; const thud = Math.sin(this.sub) * this.popLow; this.popLow *= Math.exp(-dt / 0.045);
       const pops = crack * 1.5 + thud * 1.1;
 
-      // --- intake / induction roar under load
-      this.lp[2] += ((this.rnd() * 2 - 1) - this.lp[2]) * (0.03 + 0.1 * rev);
-      const intake = this.lp[2] * torque * (0.1 + 0.5 * rev);
+      // --- intake / induction roar under load (kept low: it is broadband)
+      this.lp[2] += ((this.rnd() * 2 - 1) - this.lp[2]) * (0.02 + 0.05 * rev);
+      const intake = this.lp[2] * torque * (0.03 + 0.12 * rev);
 
-      const drive = 1.1 + 1.7 * torque;
+      // --- the engine's note: partials locked to the firing frequency (half orders included,
+      // a V8 is uneven per bank), louder under load; this is what makes it sing, not hiss
+      this.ph += (this.rpm / 120) * (cyl / 2) * dt;
+      if (this.ph > 1e6) this.ph -= 1e6;
+      const tp = 2 * Math.PI * this.ph;
+      const note = (0.5 * Math.sin(tp) + 1.0 * Math.sin(2 * tp) + 0.35 * Math.sin(3 * tp + 0.7) + 0.45 * Math.sin(4 * tp + 1.3) + 0.2 * Math.sin(6 * tp + 2.1))
+        * (0.25 + 0.75 * torque) * (0.55 + 0.45 * rev);
+
+      const drive = 1.0 + 0.9 * torque;
       for (let b = 0; b < 2; b++) {
         // cabin sees both banks, each ear favours one
         // remove DC before the saturator (a pulse train has a large mean), then clip softly
-        const raw = (mix[b] * 0.75 + mix[1 - b] * 0.45) * 0.2 + intake;
+        const raw = (mix[b] * 0.75 + mix[1 - b] * 0.45) * 0.2 + intake + note * 0.12;
         const ac = raw - this.dc[b] + 0.9985 * this.lp[b]; this.dc[b] = raw; this.lp[b] = ac;
         // slow level control: every engine layout lands at the same loudness for a given
         // throttle, quiet when coasting so the pops stand clear of it
@@ -197,7 +206,7 @@ export class EngineSound {
     this.noiseFilter = ctx.createBiquadFilter(); this.noiseFilter.type = 'bandpass'; this.noiseFilter.Q.value = 0.8;
     this.noiseGain = ctx.createGain(); this.noiseGain.gain.value = 0;
     noise.connect(this.noiseFilter).connect(this.noiseGain).connect(this.chop);
-    const windFilter = ctx.createBiquadFilter(); windFilter.type = 'lowpass'; windFilter.frequency.value = 700;
+    const windFilter = ctx.createBiquadFilter(); windFilter.type = 'lowpass'; windFilter.frequency.value = 400;
     this.windGain = ctx.createGain(); this.windGain.gain.value = 0;
     noise.connect(windFilter).connect(this.windGain).connect(this.master);
 
@@ -223,7 +232,7 @@ export class EngineSound {
       this.engineGain.gain.setTargetAtTime(0, t, k); this.noiseGain.gain.setTargetAtTime(0, t, k);
       this.chopDepth.gain.setTargetAtTime(0, t, k);
       // tyre roar and wind build with speed
-      this.windGain.gain.setTargetAtTime(Math.min(0.5, (speed / 90) ** 1.6 * 0.5), t, 0.2);
+      this.windGain.gain.setTargetAtTime(Math.min(0.12, (speed / 90) ** 1.6 * 0.12), t, 0.2);
       return;
     }
     if (e.tone === 'heli') {

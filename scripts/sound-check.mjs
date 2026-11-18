@@ -35,8 +35,17 @@ const res = await page.evaluate(async (override) => {
       if (f < 80) band.sub += p; else if (f < 300) band.low += p; else if (f < 1500) band.mid += p; else band.high += p;
       if (f < 400 && re * re + im * im > best) { best = re * re + im * im; bestF = f; }
     }
+    // spectral flatness 40 Hz - 4 kHz (geometric / arithmetic mean of the power spectrum):
+    // ~1 for white noise, towards 0 for a clear, pitched engine note
+    let lg = 0, ar = 0, nf = 0;
+    for (let f = 40; f <= 4000; f += 5) {
+      let re = 0, im = 0; const w = (2 * Math.PI * f) / sr;
+      for (let i = 0; i < N; i += 2) { re += a[i] * Math.cos(w * i); im -= a[i] * Math.sin(w * i); }
+      const p = re * re + im * im + 1e-12; lg += Math.log(p); ar += p; nf++;
+    }
+    const flatness = +(Math.exp(lg / nf) / (ar / nf)).toFixed(3);
     const tot = band.sub + band.low + band.mid + band.high || 1;
-    return { rms: +Math.sqrt(sum / a.length).toFixed(3), peak: +peak.toFixed(3), nan: bad, strongestBelow400Hz: bestF,
+    return { rms: +Math.sqrt(sum / a.length).toFixed(3), peak: +peak.toFixed(3), nan: bad, flatness, strongestBelow400Hz: bestF,
       sub: +(band.sub / tot).toFixed(2), low: +(band.low / tot).toFixed(2), mid: +(band.mid / tot).toFixed(2), high: +(band.high / tot).toFixed(2) };
   };
   const base = { cyl: 8, redline: 8600, gear: 3, on: 1 };
