@@ -88,6 +88,18 @@ for (const [c, list] of [...byCity].sort()) {
       bounds: Object.fromEntries(Object.entries(bounds).map(([k, v]) => [k, +v.toFixed(6)])),
     });
     console.log(c, d.city, d.ward ?? '', type, 'lod' + d.lod, d.texture ? 'tex' : '', ((d.file_size ?? 0) / 1e6).toFixed(0) + 'MB');
+    // a textured LOD3 set is the whole ward again with LOD3 geometry where it exists: a
+    // high-detail stand-in for the LOD2 set, used at the highest quality (see scripts/lod3.mjs)
+    const hi = type === 'bldg' && d.lod === '2' ? list.find((o) => o.type_en === 'bldg' && o.lod === '3' && o.texture) : null;
+    if (hi) {
+      const w = await getJson(hi.url);
+      tilesets.push({
+        id: hi.id, cityCode: c, city: d.ward ? `${d.city}${d.ward}` : d.city, type: 'bldg', lod: 3, texture: true,
+        remoteUrl: hi.url, assetUrl: w.root?.children?.[0]?.content?.uri ?? null, fileSize: hi.file_size ?? null,
+        bounds: tilesets[tilesets.length - 1].bounds, replaces: d.id,
+      });
+      console.log(c, '  + LOD3 stand-in', ((hi.file_size ?? 0) / 1e6).toFixed(0) + 'MB');
+    }
   }
 }
 

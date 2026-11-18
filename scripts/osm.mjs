@@ -157,7 +157,8 @@ for (const qt of [...qTiles].sort()) {
   const m = loadManifest();
   const tiles = new Set(m.osm?.tiles ?? []);
   for (const k of keys) tiles.add(k);
-  m.osm = { zoom: OZ, tiles: [...tiles].sort(), attribution: '© OpenStreetMap contributors (ODbL)' };
+  // not complete until every query tile is done (the game keeps using the shipped roads until then)
+  m.osm = { zoom: OZ, tiles: [...tiles].sort(), attribution: '© OpenStreetMap contributors (ODbL)', complete: done.size >= qTiles.size };
   saveManifest(m);
   console.log(`[${n}/${qTiles.size}] ${qt}: ${ways} ways`);
 }

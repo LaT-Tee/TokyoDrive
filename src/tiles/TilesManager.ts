@@ -25,6 +25,8 @@ export interface ManifestTileset {
   url?: string;
   /** Official streaming URL (prototype / fallback only). */
   remoteUrl: string;
+  /** A high-detail (LOD3) stand-in for this LOD2 set: used instead of it at the highest detail. */
+  replaces?: string;
   bounds: { west: number; south: number; east: number; north: number };
 }
 export interface Manifest {
@@ -32,7 +34,7 @@ export interface Manifest {
   bounds: { west: number; south: number; east: number; north: number };
   tilesets: ManifestTileset[];
   terrain: { dem: string[]; demFill: string[]; ortho: string[]; safetyDem: string[]; safetyPhoto: string[] };
-  osm?: { zoom: number; tiles: string[] };
+  osm?: { zoom: number; tiles: string[]; complete?: boolean };
 }
 
 /** Retries failed fetches with backoff; a tile that keeps failing is reported, not fatal. */
@@ -61,11 +63,13 @@ class RetryFetchPlugin {
  *  facades stay crisp at grazing angles. */
 class TextureLimitPlugin {
   name = 'TEXTURE_LIMIT_PLUGIN';
-  constructor(private owner: { textureNear: number; textureFar: number; anisotropy: number }) {}
+  constructor(private owner: { textureNear: number; textureFar: number; anisotropy: number }, private type = '') {}
   async processTileModel(scene: THREE.Object3D, tile: any): Promise<void> {
     const err = tile?.geometricError ?? 0;
-    // leaf tiles (error 0) are only shown close to the camera: they get the big textures
-    const max = err < 1 ? this.owner.textureNear : this.owner.textureFar;
+    // leaf tiles (error 0) are only shown close to the camera: they get the big textures.
+    // Street furniture is small and dense (PLATEAU's LOD3 sets weigh 45-90 MB a tile in
+    // memory at full texture size, enough to fill the cache and starve the buildings): 256 px.
+    const max = this.type === 'frn' ? 256 : err < 1 ? this.owner.textureNear : this.owner.textureFar;
     const seen = new Set<THREE.Texture>();
     scene.traverse((o) => {
       const m = o as THREE.Mesh;
@@ -215,6 +219,11 @@ interface Entry {
   tiles: TilesRenderer | null;
   failed: boolean;
   far: boolean; // LOD1 white-box layer for distant views from the air
+  /** The other set of a LOD2 / LOD3 pair covering the same buildings. */
+  partner: Entry | null;
+  /** Models loaded since activation (a set is "ready" once it has some and nothing is pending). */
+  models: number;
+  activatedAt: number;
 }
 
 export class TilesManager implements DeckProvider {
@@ -275,7 +284,12 @@ export class TilesManager implements DeckProvider {
         frame.llaToLocal(la, lo, 0, p);
         minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
       }
-      this.entries.push({ def, minX, maxX, minZ, maxZ, tiles: null, failed: false, far: def.type === 'bldgFar' });
+      this.entries.push({ def, minX, maxX, minZ, maxZ, tiles: null, failed: false, far: def.type === 'bldgFar', partner: null, models: 0, activatedAt: 0 });
+    }
+    for (const e of this.entries) {
+      if (!e.def.replaces) continue;
+      const base = this.entries.find((o) => o.def.id === e.def.replaces);
+      if (base) { e.partner = base; base.partner = e; }
     }
   }
 
@@ -285,6 +299,7 @@ export class TilesManager implements DeckProvider {
   }
 
   private activate(e: Entry): void {
+    e.models = 0; e.activatedAt = performance.now();
     const tiles = new TilesRenderer(this.url(e.def));
     if (this.lru) { tiles.lruCache = this.lru; tiles.downloadQueue = this.dq; tiles.parseQueue = this.pq; }
     else {
@@ -295,13 +310,13 @@ export class TilesManager implements DeckProvider {
       this.dq.maxJobsPerOrigin = 6; this.pq.maxJobs = 1;
     }
     tiles.registerPlugin(new RetryFetchPlugin() as any);
-    tiles.registerPlugin(new TextureLimitPlugin(this) as any);
+    tiles.registerPlugin(new TextureLimitPlugin(this, e.def.type) as any);
     tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: this.draco, autoDispose: false } as any));
     // material fixes run in processTileModel, i.e. before 'load-model', where the fade plugin wraps them
     tiles.registerPlugin({ name: 'TD_MATERIALS', processTileModel: (scene: THREE.Object3D) => prepareMaterials(scene, e.def.type) } as any);
     // cross-fade between detail levels instead of popping (dithered, so no sorting issues)
     tiles.registerPlugin(new TilesFadePlugin({ fadeDuration: 350, maximumFadeOutTiles: 80 }) as any);
-    tiles.errorTarget = e.far ? this.farErrorTarget : this.errorTarget;
+    tiles.errorTarget = e.far ? this.farErrorTarget : this.errorTarget * this.pressure;
     // Tiles kept around the car by the near camera are in the scene but often behind the view:
     // let three.js frustum-cull each mesh (the renderer disables that by default).
     tiles.autoDisableRendererCulling = false;
@@ -317,6 +332,7 @@ export class TilesManager implements DeckProvider {
     const isBridge = e.def.type === 'brid';
     const world = new THREE.Matrix4();
     tiles.addEventListener('load-model', (ev: any) => {
+      e.models++;
       const scene = ev.scene as THREE.Object3D;
       const coarse = e.def.type === 'bldg' && (ev.tile?.children?.length ?? 0) > 0 && (ev.tile?.geometricError ?? 0) >= 1;
       scene.updateMatrix();
@@ -362,7 +378,34 @@ export class TilesManager implements DeckProvider {
     e.tiles = tiles;
   }
 
+  /**
+   * Building detail: 2 = PLATEAU LOD2 everywhere, 3 = LOD3 stand-ins where published
+   * (highest quality, on the ground). Switching swaps each pair without a gap: the new set
+   * loads while the old one is still shown, then the old one goes.
+   */
+  setDetail(lod: number): void {
+    if (lod === this.detail) return;
+    this.detail = lod; this.lastSelect = -1e9;
+  }
+  private detail = 2;
+  /** Load street furniture (signs, lights, rails) at all. */
+  furniture = true;
+  /** Is this set the one wanted at the current detail? */
+  private wanted(e: Entry): boolean {
+    if (!e.partner) return true;
+    const hi = !!e.def.replaces;
+    const hiOk = (hi ? e : e.partner).failed === false;
+    return hi ? this.detail >= 3 && hiOk : !(this.detail >= 3 && hiOk);
+  }
+  private ready(e: Entry): boolean {
+    const st = (e.tiles as any)?.stats;
+    const idle = !st || (st.queued ?? 0) + (st.downloading ?? 0) + (st.parsing ?? 0) === 0;
+    // while driving something is always loading: after a few seconds what has arrived will do
+    return !!e.tiles && e.models > 0 && (idle || performance.now() - e.activatedAt > 6000);
+  }
+
   private deactivate(e: Entry): void {
+    e.models = 0;
     if (!e.tiles) return;
     this.root.remove(e.tiles.group);
     try { e.tiles.dispose(); } catch (err) { console.warn('[tiles] dispose failed', err); }
@@ -390,7 +433,23 @@ export class TilesManager implements DeckProvider {
 
   setErrorTarget(v: number): void {
     this.errorTarget = v;
-    for (const e of this.entries) if (e.tiles && !e.far) e.tiles.errorTarget = v;
+    for (const e of this.entries) if (e.tiles && !e.far) e.tiles.errorTarget = v * this.pressure;
+  }
+  /**
+   * Cache pressure: >1 while the tile cache is full. A full cache refuses new tiles - and the
+   * ones it refuses are the detailed buildings next to the car (dense wards like Minato,
+   * whose tiles are heavy). So distant detail is coarsened until the near tiles fit, and
+   * restored slowly once there is room again.
+   */
+  private pressure = 1;
+  private relieve(): void {
+    const l = this.lru;
+    if (!l || !l.maxBytesSize) return;
+    const used = l.cachedBytes ?? 0;
+    const before = this.pressure;
+    if (used > l.maxBytesSize * 0.97) this.pressure = Math.min(5, this.pressure * 1.25);
+    else if (used < l.minBytesSize * 0.85) this.pressure = Math.max(1, this.pressure / 1.08);
+    if (this.pressure !== before) for (const e of this.entries) if (e.tiles && !e.far) e.tiles.errorTarget = this.errorTarget * this.pressure;
   }
 
   /** Call once per frame (after the camera has been updated). */
@@ -398,13 +457,23 @@ export class TilesManager implements DeckProvider {
     const range = this.loadDistance + 150;
     if (now - this.lastSelect > 1000) {
       this.lastSelect = now;
+      this.relieve();
       for (const e of this.entries) {
         const dx = Math.max(e.minX - x, 0, x - e.maxX), dz = Math.max(e.minZ - z, 0, z - e.maxZ);
         const d = Math.hypot(dx, dz);
         // vegetation / street furniture are small-scale detail: only close to the car
-        const r = e.far ? (this.farEnabled ? this.farDistance : -1) : e.def.type === 'veg' || e.def.type === 'frn' ? Math.min(range, 450) : range;
+        let r = e.far ? (this.farEnabled ? this.farDistance : -1)
+          : e.def.type === 'frn' ? (this.furniture ? Math.min(range, 250) : -1) // street furniture: close by, and not at all on 'performance'
+          : e.def.type === 'veg' ? Math.min(range, 450) : range;
+        // a LOD2 / LOD3 pair: the unwanted one stays (shown) only until the wanted one is ready
+        if (e.partner && !this.wanted(e) && !(e.partner.tiles && !this.ready(e.partner) && e.tiles)) r = -1;
         if (!e.tiles && !e.failed && d < r) this.activate(e);
         else if (e.tiles && (r < 0 || d > r * 1.3 + 500)) this.deactivate(e);
+      }
+      // while both of a pair are loaded, show only one
+      for (const e of this.entries) {
+        if (!e.partner || !e.tiles) continue;
+        e.tiles.group.visible = this.wanted(e) ? (this.ready(e) || !e.partner.tiles) : !(e.partner.tiles && this.ready(e.partner));
       }
     }
     // tile selection is CPU work per tileset: 20 Hz is plenty at driving speeds

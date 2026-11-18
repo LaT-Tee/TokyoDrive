@@ -15,6 +15,8 @@ function serveData(): Plugin {
   const handler = (req: any, res: any, next: any) => {
     const url = decodeURIComponent((req.url as string).split('?')[0]);
     if (!url.startsWith('/data/')) return next();
+    // ?shipped: the copy that ships with the repo (public/data), e.g. while a local OSM bake is unfinished
+    if (/[?&]shipped\b/.test(req.url as string)) return next();
     const file = normalize(join(root, url.slice(6)));
     if (!file.startsWith(root)) { res.statusCode = 403; return res.end(); }
     try {

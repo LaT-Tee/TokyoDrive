@@ -9,6 +9,8 @@ PLATEAU 3D 城市模型，用 Three.js 直接渲染，没有游戏引擎，没�
 - 飞行时远处用 LOD1 白模补到地平线，加载边界抖动淡出
 - 可选：用你自己的 Cesium ion 令牌，给没有贴图的 PLATEAU 建筑取用 Google 扫描数据的真实颜色
 - 地图传送、车内视角、鼠标环顾、太阳阴影、三档画质
+- 「极致」画质在地面上会换用 PLATEAU 的 LOD3 建筑（港区、台东区、墨田区、横滨西区和
+  中区、濑谷区、川崎区）；飞行时一律用 LOD2
 - 界面支持中文、日本語、English：默认跟随浏览器语言，车库页可随时切换（会记住选择）
 
 ## 运行
@@ -85,7 +87,9 @@ node scripts/publish-data.mjs
 ```
 
 依次是：从 PLATEAU 数据目录枚举覆盖范围、通过 Overpass 烘焙道路数据、
-把道路数据复制到 `public/data`。
+把道路数据复制到 `public/data`。`catalog.mjs` 会把有 LOD3 的区一并列出；已有的清单可以用
+`node scripts/lod3.mjs` 补上这些 LOD3 条目，再跑一次 `download.mjs` 下载它们（约 1.2 GB）。
+本地的道路烘焙没跑完之前，游戏继续用仓库自带的完整道路数据。
 
 **平时不需要运行这些脚本**：道路数据已经烘焙好提交在 `public/data` 里，游戏直接读取。
 只有扩大覆盖范围时才需要重跑。`osm.mjs` 会向公共 Overpass 服务器发几十个查询，

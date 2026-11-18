@@ -3186,6 +3186,132 @@
     "east": 139.532156,
     "north": 35.624915
    }
+  },
+  {
+   "id": "13103_bldg_lod3",
+   "cityCode": "13103",
+   "city": "港区",
+   "type": "bldg",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13103-bldg-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/c7/ffcc73-1d33-434b-a49a-aa0289160814/13103_minato-ku_pref_2025_citygml_1_op_bldg_3dtiles_13103_minato-ku_lod3/tileset.json",
+   "fileSize": 369231400,
+   "bounds": {
+    "west": 139.708705,
+    "south": 35.623138,
+    "east": 139.782376,
+    "north": 35.68281
+   },
+   "replaces": "13103_bldg_lod2"
+  },
+  {
+   "id": "13106_bldg_lod3",
+   "cityCode": "13106",
+   "city": "台東区",
+   "type": "bldg",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13106-bldg-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/db/8ef7d4-2a4c-42e0-8701-ac85aa28238e/13106_taito-ku_city_2025_citygml_1_op_bldg_3dtiles_lod3/tileset.json",
+   "fileSize": 454029570,
+   "bounds": {
+    "west": 139.763214,
+    "south": 35.694704,
+    "east": 139.809719,
+    "north": 35.731218
+   },
+   "replaces": "13106_bldg_lod2"
+  },
+  {
+   "id": "13107_bldg_lod3",
+   "cityCode": "13107",
+   "city": "墨田区",
+   "type": "bldg",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/13107-bldg-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/f2/aaaf35-d94c-4c15-affd-d9f652cd16c1/13107_sumida-ku_pref_2025_citygml_1_op_bldg_3dtiles_13107_sumida-ku_lod3/tileset.json",
+   "fileSize": 109243830,
+   "bounds": {
+    "west": 139.788915,
+    "south": 35.686993,
+    "east": 139.842155,
+    "north": 35.743429
+   },
+   "replaces": "13107_bldg_lod2"
+  },
+  {
+   "id": "14103_bldg_lod3",
+   "cityCode": "14103",
+   "city": "横浜市西区",
+   "type": "bldg",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/14103-bldg-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/57/4b4e13-9239-4570-b4c3-18f695ef7035/14100_yokohama-shi_city_2024_citygml_2_op_bldg_3dtiles_14103_nishi-ku_lod3/tileset.json",
+   "fileSize": 55530784,
+   "bounds": {
+    "west": 139.603548,
+    "south": 35.442498,
+    "east": 139.639377,
+    "north": 35.472032
+   },
+   "replaces": "14103_bldg_lod2"
+  },
+  {
+   "id": "14104_bldg_lod3",
+   "cityCode": "14104",
+   "city": "横浜市中区",
+   "type": "bldg",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/14104-bldg-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/98/34e4f3-a849-4f12-8bd2-50826a53fa62/14100_yokohama-shi_city_2024_citygml_2_op_bldg_3dtiles_14104_naka-ku_lod3/tileset.json",
+   "fileSize": 157300540,
+   "bounds": {
+    "west": 139.621666,
+    "south": 35.393159,
+    "east": 139.695191,
+    "north": 35.45779
+   },
+   "replaces": "14104_bldg_lod2"
+  },
+  {
+   "id": "14114_bldg_lod3",
+   "cityCode": "14114",
+   "city": "横浜市瀬谷区",
+   "type": "bldg",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/14114-bldg-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/27/d613cc-82be-4235-ada0-c44191af7a39/14100_yokohama-shi_city_2024_citygml_2_op_bldg_3dtiles_14114_seya-ku_lod3/tileset.json",
+   "fileSize": 19228240,
+   "bounds": {
+    "west": 139.464783,
+    "south": 35.434853,
+    "east": 139.511555,
+    "north": 35.502594
+   },
+   "replaces": "14114_bldg_lod2"
+  },
+  {
+   "id": "14131_bldg_lod3",
+   "cityCode": "14131",
+   "city": "川崎市川崎区",
+   "type": "bldg",
+   "lod": 3,
+   "texture": true,
+   "remoteUrl": "https://api.plateauview.mlit.go.jp/datacatalog/3dtiles/14131-bldg-lod3-texture-latest/tileset.json",
+   "assetUrl": "https://assets.cms.plateau.reearth.io/assets/21/8d6b38-7c1f-4170-ba55-3f4cdecdb0bc/14130_kawasaki-shi_city_2022_citygml_4_op_bldg_3dtiles_14131_kawasaki-ku_lod3/tileset.json",
+   "fileSize": 35933010,
+   "bounds": {
+    "west": 139.688695,
+    "south": 35.469796,
+    "east": 139.83562,
+    "north": 35.545156
+   },
+   "replaces": "14131_bldg_lod2"
   }
  ],
  "terrain": {

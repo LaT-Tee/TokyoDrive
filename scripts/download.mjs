@@ -37,7 +37,17 @@ console.log(`${todo.length} tilesets to download (${(totalBytes / 1e9).toFixed(2
 let n = 0, failed = 0;
 for (const t of todo) {
   n++;
-  if (!t.assetUrl) { console.warn(`[${n}/${todo.length}] ${t.id}: no asset URL, stays on streaming`); failed++; continue; }
+  if (!t.assetUrl) {
+    // some city-wide sets (Yokohama, Kawasaki bridges / vegetation / furniture) are empty
+    // wrappers in PLATEAU's catalog: nothing to download, and nothing streams either
+    let empty = false;
+    try { const w = await (await fetch(t.remoteUrl)).json(); empty = !w.root?.children?.length && !w.root?.content; if (!empty) t.assetUrl = w.root?.children?.[0]?.content?.uri ?? null; } catch {}
+    if (!t.assetUrl) {
+      console.log(`[${n}/${todo.length}] ${t.id}: ${empty ? 'empty in the PLATEAU catalog (no data published), skipped' : 'no asset URL, stays on streaming'}`);
+      if (!empty) failed++;
+      continue;
+    }
+  }
   const zipUrl = t.assetUrl.replace(/\/tileset\.json$/, '.zip');
   const dest = join(tilesDir, t.id), zip = join(tilesDir, t.id + '.zip'), tmp = dest + '.partial';
   try {

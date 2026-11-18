@@ -22,7 +22,8 @@ export class Roads {
   version = 0; // bumped whenever the set of loaded ways changes
   private nameCache = { x: 1e9, z: 1e9, name: '' };
 
-  constructor(private cfg: { zoom: number; tiles: Set<string>; base: string } | null) {}
+  /** @param cfg.query appended to each tile URL (e.g. '?shipped') */
+  constructor(private cfg: { zoom: number; tiles: Set<string>; base: string; query?: string } | null) {}
 
   get enabled(): boolean { return !!this.cfg; }
 
@@ -61,7 +62,7 @@ export class Roads {
 
   private async load(key: string): Promise<void> {
     try {
-      const r = await fetch(`${this.cfg!.base}/${this.cfg!.zoom}/${key}.json`);
+      const r = await fetch(`${this.cfg!.base}/${this.cfg!.zoom}/${key}.json${this.cfg!.query ?? ''}`);
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const raw = (await r.json()) as { ways: RawWay[] };
       const out: Way[] = [];

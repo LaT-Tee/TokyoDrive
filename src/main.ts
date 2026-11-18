@@ -65,7 +65,14 @@ async function boot(): Promise<void> {
   const ground = new Ground(terrain, obstacles);
   const tiles = new TilesManager(manifest, dataBase, camera, renderer, obstacles);
   scene.add(tiles.root);
-  const roads = new Roads(manifest.osm ? { zoom: manifest.osm.zoom, tiles: new Set(manifest.osm.tiles), base: `${dataBase}/osm` } : null);
+  // Road data: a local OSM bake (./data) is used once it is complete; while scripts/osm.mjs is
+  // still running (or was stopped) the complete copy that ships with the repo is used instead.
+  let osm = manifest.osm, osmQuery = '';
+  if (dataBase && !osm?.complete) {
+    const shipped = await fetchJson<Manifest>(`${dataBase}/manifest.json?shipped`);
+    if (shipped?.osm && (shipped.osm.tiles.length > (osm?.tiles.length ?? 0) || !osm)) { osm = shipped.osm; osmQuery = '?shipped'; }
+  }
+  const roads = new Roads(osm ? { zoom: osm.zoom, tiles: new Set(osm.tiles), base: `${dataBase}/osm`, query: osmQuery } : null);
   const decks = new Decks(roads, terrain, tiles);
   scene.add(decks.group);
   const tunnels = new Tunnels(roads, terrain);
@@ -369,6 +376,7 @@ async function boot(): Promise<void> {
   };
 
   let crashes = 0;
+  let debugDetail = 0; // test hook: force a building detail level (0 = automatic)
   const grabs: ((f: { w: number; h: number; px: Uint8Array }) => void)[] = [];
   // ---- loop
   const fps = { frames: 0, t: performance.now(), value: 0, worst: 0 };
@@ -409,6 +417,9 @@ async function boot(): Promise<void> {
       } else car.surfaceGrip = 1;
     }
     if (tiles.version !== tilesVersion) { tilesVersion = tiles.version; sky.invalidateShadows(); }
+    // PLATEAU LOD3 where published, only at the highest quality and on the ground; aircraft LOD2
+    tiles.setDetail(debugDetail || (quality === 'ultra' && !flying() ? 3 : 2));
+    tiles.furniture = quality !== 'performance' && !flying();
 
     if (now - lastTerrain > 200) {
       lastTerrain = now;
@@ -450,7 +461,9 @@ async function boot(): Promise<void> {
         const gy = terrain.heightAt(car.x, car.z, car.y);
         ground.samples--; ground.surface(car.x, car.z, car.y);
         const onRoad = ground.lastOnStreet || ground.lastOnDeck || ground.lastInTunnel;
-        const inBuilding = !onRoad && obstacles.heightAt(car.x, car.z) > car.y + 2 && !ground.onRoad?.(car.x, car.z);
+        // really inside one (centre and all four corners), not just next to a wall on the 2 m grid
+        const hx = Math.sin(car.heading) * spec.length * 0.45, hz = -Math.cos(car.heading) * spec.length * 0.45, wx = -hz / spec.length * spec.width, wz = hx / spec.length * spec.width;
+        const inBuilding = !onRoad && [[0, 0], [hx + wx, hz + wz], [hx - wx, hz - wz], [-hx + wx, -hz + wz], [-hx - wx, -hz - wz]].every(([dx, dz]) => obstacles.heightAt(car.x + dx, car.z + dz) > car.y + 3) && !ground.onRoad?.(car.x, car.z);
         unstuck.update(now, dt, car, input, { onRoad, groundY: gy, inBuilding });
         if (unstuck.stuck) ui.toast(tr('hud.stuckHint'), 0); else ui.toast('');
       }
@@ -515,7 +528,7 @@ async function boot(): Promise<void> {
     THREE, car, visual, airc, sound, googleFill, facadeBaker, ENGINE_WORKLET_SRC, get flying() { return flying(); }, get crashes() { return crashes; }, AIR_SPAWN_AGL,
     ground, terrain, tiles, obstacles, roads, decks, tunnels, roadSurface, streets, unstuck, streetCarve, vegetation, sky, camera, renderer, fps, frame, look, map,
     get settled() { return settled; }, get playing() { return playing; }, get inTunnel() { return inTunnel; },
-    teleport, recover,
+    teleport, recover, get tilePressure() { return (tiles as any).pressure; }, set debugDetail(v: number) { debugDetail = v; },
     /** Test helper: snap to the nearest road of at least the given class (0 motorway … 12 living street). */
     toRoad(maxCls: number) { recover(maxCls); camHeading = car.heading; },
     /** Pixels of the next rendered frame (bottom-up RGBA), for image checks. */
