@@ -1,23 +1,20 @@
-// Automatic recovery for a car that cannot go on: whatever trapped it (a gap in the data,
-// a pit, a wall it cannot back out of, falling through the world), it is put back on the
-// road a little way behind, where it last drove normally, facing the way it was going.
+// Getting a car that cannot go on back on the road - only when the driver presses R. This
+// notices when the car looks stuck and says so (a hint to press R); it never moves the car
+// by itself.
 //
-// The car leaves a trail of safe poses (moving, on a street / deck / tunnel floor, not
-// blocked, not in the air). It is stuck when:
-//   - the driver has been pressing throttle or brake for STUCK_MS without getting 1.5 m
-//     anywhere (a hint with a countdown shows first),
-//   - it is below the ground, inside a building, or has been airborne for over 3 s,
-//   - its position is not a number.
-// The rescue always goes FORWARD: the car is put on its road further along the way it is
-// facing, past whatever stopped it (8 m, then further; stuck again at the same place soon
-// after, it starts further ahead). Only when nothing ahead is safe does it fall back to the
-// newest safe pose behind it, and without a trail to the nearest road (as with R).
+// The car looks stuck when the driver has been pressing throttle or brake for HINT_MS
+// without getting 1.5 m anywhere, or it is inside a building, below the ground, or has been
+// in the air for over 3 s.
+// R goes FORWARD: the car is put on its road further along the way it is facing, past
+// whatever stopped it (8 m, then further; pressed again at the same place soon after, it
+// starts further ahead). Only when nothing ahead is safe does it fall back to the newest
+// safe pose behind it (the car leaves a trail of those while driving normally), and
+// without one to the nearest road.
 import type { CarController, CarInput } from './CarController';
 
 const CRUMB_MS = 300;
 const TRAIL = 100;        // poses kept (~30 s of driving)
-const STUCK_MS = 3000;
-const HINT_MS = 1200;
+const HINT_MS = 1500;
 const PROGRESS_M = 1.5;
 const REWIND_M = 10;
 const AHEAD = [8, 14, 22, 32, 45, 60, 80];
@@ -40,25 +37,24 @@ export class Unstuck {
   private refX = 0; private refZ = 0; private refT = 0; private wantMs = 0;
   private airSince = 0; private badSince = 0;
   private lastRewind = { t: -1e9, x: 0, z: 0, n: 0 };
-  /** While the driver is getting nowhere: seconds left before the automatic rescue. */
-  hint: { left: number } | null = null;
+  /** True while the car looks stuck (show "press R"). */
+  stuck = false;
   rescues = 0;
 
   /** Forget the trail (teleport, vehicle change). */
   reset(car: CarController, now: number): void {
     this.trail.length = 0; this.refX = car.x; this.refZ = car.z; this.refT = now; this.wantMs = 0;
-    this.airSince = 0; this.badSince = 0; this.hint = null;
+    this.airSince = 0; this.badSince = 0; this.stuck = false;
   }
 
-  /** Call every frame while driving. Returns where to put the car, or null. */
-  update(now: number, dt: number, car: CarController, input: CarInput, env: UnstuckEnv): { pose: Pose | null; back: number } | null {
-    this.hint = null;
-    if (!Number.isFinite(car.x) || !Number.isFinite(car.y) || !Number.isFinite(car.z)) return this.rescue(now, car);
-    // falling, under the ground, inside a building: rescue straight away
+  /** Call every frame while driving: keeps the trail and decides whether the car looks stuck. */
+  update(now: number, dt: number, car: CarController, input: CarInput, env: UnstuckEnv): void {
+    if (!Number.isFinite(car.x) || !Number.isFinite(car.y) || !Number.isFinite(car.z)) { this.stuck = true; return; }
+    // in the air too long, under the ground, inside a building
     this.airSince = car.airborne ? this.airSince || now : 0;
     const bad = car.y < env.groundY - 4 || env.inBuilding;
     this.badSince = bad ? this.badSince || now : 0;
-    if ((this.airSince && now - this.airSince > 3000) || (this.badSince && now - this.badSince > 400)) return this.rescue(now, car);
+    const trapped = (this.airSince > 0 && now - this.airSince > 3000) || (this.badSince > 0 && now - this.badSince > 400);
 
     // trail of safe poses
     const moving = Math.abs(car.speed) > 1.5 && !car.blocked && !car.airborne;
@@ -75,15 +71,12 @@ export class Unstuck {
     if (Math.hypot(car.x - this.refX, car.z - this.refZ) > PROGRESS_M) { this.refX = car.x; this.refZ = car.z; this.refT = now; this.wantMs = 0; }
     const trying = input.throttle > 0 || input.brake > 0;
     if (trying) this.wantMs += dt * 1000;
-    const still = now - this.refT;
-    if (trying && this.wantMs > HINT_MS && still > HINT_MS) {
-      if (this.wantMs >= STUCK_MS && still >= STUCK_MS) return this.rescue(now, car);
-      this.hint = { left: Math.max(0, (STUCK_MS - this.wantMs) / 1000) };
-    }
-    return null;
+    this.stuck = trapped || (this.wantMs > HINT_MS && now - this.refT > HINT_MS);
   }
 
-  private rescue(now: number, car: CarController): { pose: Pose | null; back: number } {
+  /** R: where to put the car (forward along its road first); pose null = nearest road. */
+  rescue(now: number, car: CarController): { pose: Pose | null; back: number } {
+    this.stuck = false;
     const here = Number.isFinite(car.x) ? { x: car.x, z: car.z } : { x: this.refX, z: this.refZ };
     // stuck again near the same place soon after: go further back each time
     const again = now - this.lastRewind.t < 20000 && Math.hypot(here.x - this.lastRewind.x, here.z - this.lastRewind.z) < 25;

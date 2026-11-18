@@ -176,7 +176,19 @@ async function boot(): Promise<void> {
   /** The camera, HUD and streaming all follow `car`'s pose: mirror the aircraft into it. */
   const syncAir = () => { car.x = airc.x; car.y = airc.y; car.z = airc.z; car.heading = airc.heading; car.course = airc.heading; car.pitch = airc.pitch; car.roll = airc.roll; car.speed = airc.speed; };
 
-  /** Recover (R): nearest road centreline point, else nearest free ground. */
+  /** R in a car: forward along its road past whatever stopped it (see Unstuck); aircraft: recover. */
+  const rescue = () => {
+    if (flying()) { recover(); return; }
+    const res = unstuck.rescue(performance.now(), car);
+    if (res.pose) {
+      car.x = res.pose.x; car.z = res.pose.z; car.heading = car.course = res.pose.heading;
+      car.y = ground.surface(car.x, car.z, res.pose.y + 0.5);
+      car.speed = 0; car.vy = 0; car.airborne = false;
+      ui.toast(res.back < 0 ? tr('hud.unstuckAhead', { m: Math.round(-res.back) }) : tr('hud.unstuck', { m: Math.round(res.back) }));
+    } else recover();
+    camHeading = car.heading;
+  };
+  /** Recover: nearest road centreline point, else nearest free ground. */
   const recover = (maxCls = 99) => {
     if (flying()) { airc.deploy(car.x, terrain.heightAt(car.x, car.z), car.z, car.heading); syncAir(); return; }
     const r = roads.nearest(car.x, car.z, 400, maxCls);
@@ -222,7 +234,7 @@ async function boot(): Promise<void> {
     onCycleCamera: cycleCamera,
     onToggleLights: toggleLights,
     onMap: toggleMap,
-    onRecover: () => recover(),
+    onRecover: () => rescue(),
     onGoogleToken: (token) => {
       try { if (token.trim()) localStorage.setItem('td.googleToken', token.trim()); else localStorage.removeItem('td.googleToken'); } catch { /* private window */ }
       googleFill.setToken(token);
@@ -258,7 +270,7 @@ async function boot(): Promise<void> {
     if (map.open) return;
     if (e.code === 'KeyC') cycleCamera();
     if (e.code === 'KeyL') toggleLights();
-    if (e.code === 'KeyR') recover();
+    if (e.code === 'KeyR') rescue();
     if (e.code === 'KeyG') openGarage();
   });
   window.addEventListener('keyup', (e) => keys.delete(e.code));
@@ -434,22 +446,13 @@ async function boot(): Promise<void> {
         syncAir();
       } else {
         car.update(dt, input);
-        // automatic rescue when the car cannot go on (see Unstuck)
+        // looks stuck? say so - the driver decides (R, see Unstuck)
         const gy = terrain.heightAt(car.x, car.z, car.y);
         ground.samples--; ground.surface(car.x, car.z, car.y);
         const onRoad = ground.lastOnStreet || ground.lastOnDeck || ground.lastInTunnel;
         const inBuilding = !onRoad && obstacles.heightAt(car.x, car.z) > car.y + 2 && !ground.onRoad?.(car.x, car.z);
-        const res = unstuck.update(now, dt, car, input, { onRoad, groundY: gy, inBuilding });
-        if (res) {
-          if (res.pose) {
-            car.x = res.pose.x; car.z = res.pose.z; car.heading = car.course = res.pose.heading;
-            car.y = ground.surface(car.x, car.z, res.pose.y + 0.5);
-            car.speed = 0; car.vy = 0; car.airborne = false;
-            ui.toast(res.back < 0 ? tr('hud.unstuckAhead', { m: Math.round(-res.back) }) : tr('hud.unstuck', { m: Math.round(res.back) }));
-          } else { recover(); ui.toast(tr('hud.unstuckRoad')); }
-          camHeading = car.heading;
-        } else if (unstuck.hint) ui.toast(tr('hud.stuckHint', { s: Math.ceil(unstuck.hint.left) }), 0);
-        else ui.toast('');
+        unstuck.update(now, dt, car, input, { onRoad, groundY: gy, inBuilding });
+        if (unstuck.stuck) ui.toast(tr('hud.stuckHint'), 0); else ui.toast('');
       }
     }
     ui.setStartEnabled(settled);
