@@ -307,7 +307,9 @@ export class TilesManager implements DeckProvider {
       // explicit cache caps
       this.lru.minSize = 2500; this.lru.maxSize = 4000;
       this.setCacheLimit(this.cacheGB);
-      this.dq.maxJobsPerOrigin = 6; this.pq.maxJobs = 1;
+      // parsing was the bottleneck (one tile at a time: ~45 s to fill Marunouchi). 4 parallel
+      // parses / 16 downloads load it in ~20 s; more only adds long hitches (8: 290 ms frames)
+      this.dq.maxJobsPerOrigin = 16; this.pq.maxJobs = 4;
     }
     tiles.registerPlugin(new RetryFetchPlugin() as any);
     tiles.registerPlugin(new TextureLimitPlugin(this, e.def.type) as any);

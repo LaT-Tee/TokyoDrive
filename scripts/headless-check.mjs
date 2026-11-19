@@ -71,7 +71,7 @@ async function drive({ metres, maxSeconds = 120, maxKmh = 50 }) {
   const t0 = Date.now();
   let held = new Set();
   const set = async (key, on) => { if (on && !held.has(key)) { await page.keyboard.down(key); held.add(key); } else if (!on && held.has(key)) { await page.keyboard.up(key); held.delete(key); } };
-  let reversingUntil = 0, stuck = 0;
+  let reversingUntil = 0, stuck = 0, progressAt = Date.now(), progressOdo = start;
   while (Date.now() - t0 < maxSeconds * 1000) {
     const s = await page.evaluate(() => {
       const t = window.__td, c = t.car;
@@ -99,6 +99,13 @@ async function drive({ metres, maxSeconds = 120, maxKmh = 50 }) {
     });
     if (s.odometer - start >= metres) break;
     const now = Date.now();
+    // wedged somewhere for a while: do what a player is told to do and press R (the game
+    // puts the car further along its road)
+    if (s.odometer - progressOdo > 4) { progressOdo = s.odometer; progressAt = now; }
+    else if (now - progressAt > 8000) {
+      for (const k of [...held]) { await page.keyboard.up(k); held.delete(k); }
+      await page.keyboard.press('KeyR'); progressAt = now; reversingUntil = 0; await sleep(300); continue;
+    }
     if (s.blocked && now > reversingUntil) { stuck++; reversingUntil = now + 1400; }
     if (now < reversingUntil) {
       await set('KeyW', false); await set('KeyS', true);
@@ -187,6 +194,10 @@ if (mode === 'phase1') {
   check('drive>=500m', d.metres >= 500, { metres: +d.metres.toFixed(1), seconds: +d.seconds.toFixed(1) });
   check('stays-on-ground', s.minClearance > -0.1 && s.maxClearance < 0.3 && !s.airborne, { minClearance: +s.minClearance.toFixed(3), maxClearance: +s.maxClearance.toFixed(3) });
   check('ground-samples', s.fallbackSamples === 0, { samples: s.samples, fallback: s.fallbackSamples, msPerFrame: +(s.sampleMs / Math.max(1, frames)).toFixed(4) });
+  // the wall test starts from the spawn point, not from wherever the drive ended (that varies
+  // with loading speed, and a street edge can stop the probe rays before any building)
+  await page.evaluate(([x, z]) => { const c = window.__td.car; c.place(x, z, 0); }, [R.start.x, R.start.z]);
+  await sleep(1500);
   const w = await wallTest();
   await shot('phase1-wall-stop');
   check('stops-at-wall', w.ok, w);

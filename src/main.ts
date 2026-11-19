@@ -18,6 +18,7 @@ import { FacadeBaker } from './tiles/FacadeBaker';
 import { CarController, type CarInput } from './car/CarController';
 import { BODY_COLORS, CARS, VEHICLES, CarVisual, initCarLoaders } from './car/garage';
 import { AircraftController, AircraftVisual, AIR_SPAWN_AGL, type AirInput } from './air/Aircraft';
+import { Explosion } from './air/Explosion';
 import { EngineSound, ENGINE_WORKLET_SRC } from './audio/EngineSound';
 import { Sky } from './sky/Sky';
 import { Ui } from './ui/ui';
@@ -146,6 +147,19 @@ async function boot(): Promise<void> {
   const airc = new AircraftController(); airc.kind = spec.kind;
   const airVisual = new AircraftVisual(); airVisual.setKind(spec.kind);
   scene.add(airVisual.root);
+  const explosion = new Explosion();
+  scene.add(explosion.group);
+  /**
+   * (Re)deploy an aircraft at (x, z): AIR_SPAWN_AGL above the ground, and well clear of
+   * the tallest building around (the deploy point is never inside one).
+   */
+  const deployAir = (x: number, z: number, heading: number) => {
+    const g = terrain.heightAt(x, z);
+    let top = g;
+    for (let r = 0; r <= 150; r += 30) for (let a = 0; a < 6.28; a += r ? 0.5 : 7) top = Math.max(top, obstacles.heightAt(x + Math.cos(a) * r, z + Math.sin(a) * r));
+    airc.deploy(x, Math.max(g, top + 80 - AIR_SPAWN_AGL), z, heading);
+    explosion.stop();
+  };
   const sound = new EngineSound();
   let color = params.get('color') ? '#' + params.get('color') : BODY_COLORS[0];
   visual = new CarVisual();
@@ -176,7 +190,7 @@ async function boot(): Promise<void> {
     unstuck.reset(car, performance.now());
     if (flying()) {
       // aircraft are deployed straight into the air, already flying: no waiting for the ground
-      airc.deploy(p.x, terrain.heightAt(p.x, p.z), p.z, car.heading);
+      deployAir(p.x, p.z, car.heading);
       syncAir(); settled = true;
     }
   };
@@ -197,7 +211,7 @@ async function boot(): Promise<void> {
   };
   /** Recover: nearest road centreline point, else nearest free ground. */
   const recover = (maxCls = 99) => {
-    if (flying()) { airc.deploy(car.x, terrain.heightAt(car.x, car.z), car.z, car.heading); syncAir(); return; }
+    if (flying()) { deployAir(car.x, car.z, car.heading); syncAir(); return; }
     const r = roads.nearest(car.x, car.z, 400, maxCls);
     if (r) {
       const g = terrain.heightAt(r.x, r.z, car.y);
@@ -447,12 +461,16 @@ async function boot(): Promise<void> {
       readInput();
       if (flying()) {
         const gy = terrain.heightAt(car.x, car.z, car.y);
-        if (airc.crashed) { if (now - crashAt > 1200) { airc.deploy(car.x, gy, car.z, car.heading); } }
-        else {
+        if (!airc.crashed) {
           airc.update(dt, airIn, gy);
-          // hitting the ground, water or a building ends the flight; it restarts in the air
-          const floor = Math.max(terrain.heightAt(airc.x, airc.z, airc.y), obstacles.heightAt(airc.x, airc.z));
-          if (airc.y < floor + 1.2) { airc.y = floor + 1.2; airc.crashed = true; airc.speed = 0; crashAt = now; crashes++; }
+          // hitting the ground, a road, a bridge, water or a building: the aircraft explodes and
+          // the wreck stays there - R takes off again
+          const t0 = terrain.heightAt(airc.x, airc.z, airc.y);
+          const floor = Math.max(t0, obstacles.heightAt(airc.x, airc.z), decks.deckHeight(airc.x, airc.z, airc.y + 1), tiles.deckHeight(airc.x, airc.z, airc.y + 1));
+          if (airc.y < floor + 1.2) {
+            airc.y = floor + 1.2; airc.crashed = true; airc.speed = 0; crashAt = now; crashes++;
+            explosion.start(airc.x, airc.y, airc.z, t0); sound.boom();
+          }
         }
         syncAir();
       } else {
@@ -481,7 +499,9 @@ async function boot(): Promise<void> {
     visual.animate(car.wheelSpin, car.steer);
     const firstPerson = playing && (camMode === 2 || camMode === 3);
     visual.root.visible = !firstPerson && !flying();
-    airVisual.root.visible = flying() && !firstPerson;
+    airVisual.root.visible = flying() && !firstPerson && !airc.crashed;
+    explosion.update(dt);
+    if (flying() && playing) { if (airc.crashed) ui.toast(tr('hud.crashHint'), 0); else ui.toast(''); }
     airVisual.root.position.set(car.x, car.y, car.z);
     airVisual.root.rotation.set(car.pitch, -car.heading, -car.roll, 'YXZ');
     airVisual.animate(airc as any, dt);

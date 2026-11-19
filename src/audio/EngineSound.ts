@@ -217,6 +217,23 @@ export class EngineSound {
 
   get running(): boolean { return !!this.ctx && this.ctx.state === 'running'; }
 
+  /** A crash: a deep boom with a burst of rumble, decaying over ~2 s. */
+  boom(): void {
+    const ctx = this.ctx; if (!ctx || this.muted) return;
+    const t = ctx.currentTime, len = Math.floor(ctx.sampleRate * 2.2);
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
+    let b = 0;
+    for (let i = 0; i < len; i++) { b = b * 0.97 + (Math.random() * 2 - 1) * 0.03; d[i] = b * 6 * Math.exp(-i / (ctx.sampleRate * 0.45)); }
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(1800, t); lp.frequency.exponentialRampToValueAtTime(120, t + 1.6);
+    const g = ctx.createGain(); g.gain.setValueAtTime(this.volume * 1.6, t);
+    src.connect(lp).connect(g).connect(ctx.destination); // straight out: the engine bus is silenced after a crash
+    const thump = ctx.createOscillator(); thump.type = 'sine'; thump.frequency.setValueAtTime(70, t); thump.frequency.exponentialRampToValueAtTime(28, t + 0.8);
+    const tg = ctx.createGain(); tg.gain.setValueAtTime(this.volume * 1.4, t); tg.gain.exponentialRampToValueAtTime(0.001, t + 1.2);
+    thump.connect(tg).connect(ctx.destination);
+    src.start(t); thump.start(t); thump.stop(t + 1.3);
+  }
+
   /**
    * @param rpm engine (or rotor) speed   @param load 0..1 throttle
    * @param speed vehicle speed in m/s    @param active false fades everything out (garage, map)
